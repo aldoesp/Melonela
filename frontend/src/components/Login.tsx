@@ -265,23 +265,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
               {/* Panneau gauche : Déjà inscrit ? */}
               <div className="flex h-full w-1/2 flex-col items-center justify-center bg-[#0c0c0e] px-8 text-center border-r border-zinc-800/50">
                 <Shield className="mb-3 h-10 w-10 text-emerald-400/80" />
-                <h2 className="text-2xl font-bold text-white">Déjà inscrit ?</h2>
-                <p className="mt-2 max-w-xs text-sm text-zinc-400">
-                  Accédez au centre de contrôle.
-                </p>
-                <button
-                  onClick={togglePanel}
-                  className="mt-6 flex items-center gap-2 rounded-full border border-zinc-700 bg-transparent px-6 py-2 text-xs font-bold uppercase tracking-wider text-zinc-200 transition hover:border-emerald-500 hover:text-white hover:shadow-[0_0_20px_rgba(5,150,105,0.15)]"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                  Connexion
-                </button>
-              </div>
-
-              {/* Panneau droit : Nouveau sur le SIEM ? */}
-              <div className="flex h-full w-1/2 flex-col items-center justify-center bg-[#0c0c0e] px-8 text-center">
-                <Fingerprint className="mb-3 h-10 w-10 text-emerald-400/80" />
-                <h2 className="text-2xl font-bold text-white">Nouveau sur le SIEM ?</h2>
+                <h2 className="text-2xl font-bold text-white">Nouveau sur le SIEM ? </h2>
                 <p className="mt-2 max-w-xs text-sm text-zinc-400">
                   Enregistrez un compte administrateur.
                 </p>
@@ -291,6 +275,22 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                 >
                   <ChevronRight className="h-4 w-4" />
                   S'inscrire
+                </button>
+              </div>
+
+              {/* Panneau droit : Nouveau sur le SIEM ? */}
+              <div className="flex h-full w-1/2 flex-col items-center justify-center bg-[#0c0c0e] px-8 text-center">
+                <Fingerprint className="mb-3 h-10 w-10 text-emerald-400/80" />
+                <h2 className="text-2xl font-bold text-white">Déjà inscrit ?</h2>
+                <p className="mt-2 max-w-xs text-sm text-zinc-400">
+                  Accédez au centre de contrôle.
+                </p>
+                <button
+                  onClick={togglePanel}
+                  className="mt-6 flex items-center gap-2 rounded-full border border-zinc-700 bg-transparent px-6 py-2 text-xs font-bold uppercase tracking-wider text-zinc-200 transition hover:border-emerald-500 hover:text-white hover:shadow-[0_0_20px_rgba(5,150,105,0.15)]"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                  connexion
                 </button>
               </div>
             </div>
