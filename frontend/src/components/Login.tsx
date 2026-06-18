@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import type { FormEvent } from 'react';
+import { loginUser, registerUser } from '../api/authApi';
 import {
   Shield,
   Lock,
-  Mail,
   User,
   Eye,
   EyeOff,
@@ -23,20 +23,78 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [showSignUpPassword, setShowSignUpPassword] = useState<boolean>(false);
   const [signInIdentifier, setSignInIdentifier] = useState<string>('');
   const [signInPassword, setSignInPassword] = useState<string>('');
+  const [signInError, setSignInError] = useState<string | null>(null);
+  const [isSignInSubmitting, setIsSignInSubmitting] = useState<boolean>(false);
   const [signUpUsername, setSignUpUsername] = useState<string>('');
-  const [signUpEmail, setSignUpEmail] = useState<string>('');
   const [signUpPassword, setSignUpPassword] = useState<string>('');
+  const [signUpPasswordConfirm, setSignUpPasswordConfirm] = useState<string>('');
+  const [signUpError, setSignUpError] = useState<string | null>(null);
+  const [isSignUpSubmitting, setIsSignUpSubmitting] = useState<boolean>(false);
+  const [signUpSuccess, setSignUpSuccess] = useState<string | null>(null);
 
-  const handleSignIn = (e: FormEvent<HTMLFormElement>): void => {
+  const handleSignIn = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
-    // Simule une authentification réussie
-    onLoginSuccess();
+    setSignInError(null);
+    setIsSignInSubmitting(true);
+
+    try {
+      await loginUser(signInIdentifier.trim(), signInPassword);
+      onLoginSuccess();
+    } catch (error) {
+      if (error instanceof Error) {
+        setSignInError(error.message);
+      } else {
+        setSignInError('Erreur inconnue lors de la connexion');
+      }
+    } finally {
+      setIsSignInSubmitting(false);
+    }
   };
 
-  const handleSignUp = (e: FormEvent<HTMLFormElement>): void => {
+  const handleSignUp = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
-    // Logique d'inscription simulée
-    onLoginSuccess();
+    setSignUpError(null);
+    setSignUpSuccess(null);
+
+    // Validation
+    if (signUpPassword !== signUpPasswordConfirm) {
+      setSignUpError('Les mots de passe ne correspondent pas');
+      return;
+    }
+
+    if (signUpPassword.length < 6) {
+      setSignUpError('Le mot de passe doit contenir au moins 6 caractères');
+      return;
+    }
+
+    if (signUpUsername.trim().length < 3) {
+      setSignUpError('Le nom d\'utilisateur doit contenir au moins 3 caractères');
+      return;
+    }
+
+    setIsSignUpSubmitting(true);
+
+    try {
+      await registerUser(signUpUsername.trim(), signUpPassword);
+      setSignUpSuccess('Inscription réussie ! Veuillez vous connecter.');
+      // Réinitialiser les champs
+      setSignUpUsername('');
+      setSignUpPassword('');
+      setSignUpPasswordConfirm('');
+      // Rediriger vers le formulaire de connexion après 2 secondes
+      setTimeout(() => {
+        setIsRightPanelActive(false);
+        setSignUpSuccess(null);
+      }, 2000);
+    } catch (error) {
+      if (error instanceof Error) {
+        setSignUpError(error.message);
+      } else {
+        setSignUpError('Erreur inconnue lors de l\'inscription');
+      }
+    } finally {
+      setIsSignUpSubmitting(false);
+    }
   };
 
   const togglePanel = (): void => {
@@ -133,12 +191,17 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                   </a>
                 </div>
 
+                {signInError && (
+                  <p className="text-sm text-red-400 text-center">{signInError}</p>
+                )}
+
                 <button
                   type="submit"
-                  className="flex w-full items-center justify-center gap-2 rounded-full bg-emerald-600 py-2.5 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-emerald-600/30 transition hover:bg-emerald-500 hover:shadow-emerald-500/40 border border-white/10"
+                  disabled={isSignInSubmitting}
+                  className="flex w-full items-center justify-center gap-2 rounded-full bg-emerald-600 py-2.5 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-emerald-600/30 transition hover:bg-emerald-500 hover:shadow-emerald-500/40 border border-white/10 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <LogIn className="h-4 w-4" />
-                  Connexion
+                  {isSignInSubmitting ? 'Connexion...' : <><LogIn className="h-4 w-4" />
+                  Connexion</>}
                 </button>
               </form>
 
@@ -191,21 +254,6 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
                 <div className="relative">
                   <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                    <Mail className="h-4 w-4 text-zinc-500" />
-                  </div>
-                  <input
-                    type="email"
-                    placeholder="Identifiant ou Email"
-                    value={signUpEmail}
-                    onChange={(e) => setSignUpEmail(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2.5 pl-10 pr-4 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition focus:border-emerald-500 focus:bg-zinc-800/90"
-                    autoComplete="email"
-                    required
-                  />
-                </div>
-
-                <div className="relative">
-                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
                     <Lock className="h-4 w-4 text-zinc-500" />
                   </div>
                   <input
@@ -231,12 +279,48 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                   </button>
                 </div>
 
+                <div className="relative">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                    <Lock className="h-4 w-4 text-zinc-500" />
+                  </div>
+                  <input
+                    type={showSignUpPassword ? 'text' : 'password'}
+                    placeholder="Vérification du mot de passe"
+                    value={signUpPasswordConfirm}
+                    onChange={(e) => setSignUpPasswordConfirm(e.target.value)}
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2.5 pl-10 pr-12 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition focus:border-emerald-500 focus:bg-zinc-800/90"
+                    autoComplete="new-password"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowSignUpPassword((prev) => !prev)}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-zinc-500 hover:text-zinc-300"
+                    aria-label={showSignUpPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                  >
+                    {showSignUpPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+
+                {signUpError && (
+                  <p className="text-sm text-red-400 text-center">{signUpError}</p>
+                )}
+
+                {signUpSuccess && (
+                  <p className="text-sm text-emerald-400 text-center">{signUpSuccess}</p>
+                )}
+
                 <button
                   type="submit"
-                  className="flex w-full items-center justify-center gap-2 rounded-full bg-emerald-600 py-2.5 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-emerald-600/30 transition hover:bg-emerald-500 hover:shadow-emerald-500/40 border border-white/10"
+                  disabled={isSignUpSubmitting}
+                  className="flex w-full items-center justify-center gap-2 rounded-full bg-emerald-600 py-2.5 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-emerald-600/30 transition hover:bg-emerald-500 hover:shadow-emerald-500/40 border border-white/10 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <UserPlus className="h-4 w-4" />
-                  Créer un compte
+                  {isSignUpSubmitting ? 'Inscription...' : <><UserPlus className="h-4 w-4" />
+                  Créer un compte</>}
                 </button>
               </form>
 

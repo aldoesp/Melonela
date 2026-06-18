@@ -67,7 +67,7 @@ function App() {
                   <div>
                     <h1 className="text-3xl font-semibold text-white">Bienvenue</h1>
                     <p className="mt-2 text-sm text-zinc-400">
-                      Vous êtes redirigé vers le sidebar après une connexion simulée.
+                      Vous êtes redirigé vers le sidebar après une connexion réelle.
                     </p>
                   </div>
                   <button
