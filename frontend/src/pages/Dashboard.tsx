@@ -4,22 +4,21 @@ import {
   Search, Bell, Shield, ChevronDown, ChevronRight, Play, Pause,
   Download, TrendingUp, TrendingDown, Server, AlertTriangle,
   XCircle, LogIn, LogOut, Trash2, Filter, Terminal, Wifi, Hash,
-  Crosshair, Zap, BrainCircuit,
+  BrainCircuit,
   FileDown, FileCog, CalendarDays, CheckSquare, Square,
   Clock, HardDrive, CheckCircle2, Loader2, XCircle as XCircleIcon,
-  ChevronUp, Eye, Trash, Copy, RotateCw, KeyRound, Cloud, Cpu, MonitorCog,
+  ChevronUp, Trash, Copy, RotateCw, KeyRound, Cloud, MonitorCog,
   UserCog, History, ShieldCheck, Save,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell,
-  LineChart, Line,
 } from "recharts";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 type Severity = "CRITIQUE" | "AVERTISSEMENT" | "INFO";
-type NavId = "dashboard" | "live" | "analyses" | "rapports" | "parametres" | "profil" | "sessions" | "ssh";
+type NavId = "dashboard" | "live" | "rapports" | "parametres" | "profil" | "sessions" | "ssh";
 
 interface LogEntry {
   id: number;
@@ -50,7 +49,6 @@ const SEV: Record<Severity, { pill: string; text: string; dot: string }> = {
 const NAV_ITEMS: { id: NavId; icon: React.ElementType; label: string }[] = [
   { id: "dashboard",  icon: LayoutDashboard, label: "Tableau de bord"  },
   { id: "live",       icon: Activity,        label: "Historique Live"  },
-  { id: "analyses",   icon: BarChart2,       label: "Analyses"         },
   { id: "rapports",   icon: FileText,        label: "Rapports"         },
   { id: "parametres", icon: Settings,        label: "Paramètres"       },
 ];
@@ -897,336 +895,6 @@ function HistoriqueLiveView({ logs, playing, setPlaying, onClear }: {
   );
 }
 
-// ── Analyses static data ───────────────────────────────────────────────────────
-
-const DAYS_FR = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
-
-const ECHECS_SUCCES = [
-  { jour: "Lun", echecs: 148, succes: 1820 },
-  { jour: "Mar", echecs: 212, succes: 2140 },
-  { jour: "Mer", echecs: 94,  succes: 1650 },
-  { jour: "Jeu", echecs: 330, succes: 1980 },
-  { jour: "Ven", echecs: 187, succes: 2380 },
-  { jour: "Sam", echecs: 64,  succes: 890  },
-  { jour: "Dim", echecs: 48,  succes: 610  },
-];
-
-const SERVICES_CIBLES = [
-  { service: "sshd.service",  hits: 412, color: "#ef4444" },
-  { service: "sudo",          hits: 284, color: "#f59e0b" },
-  { service: "nginx",         hits: 193, color: "#f59e0b" },
-  { service: "postgresql",    hits: 117, color: "#10b981" },
-  { service: "firewalld",     hits: 89,  color: "#10b981" },
-];
-
-// Heatmap: 7 days × 24 hours — value 0-100
-const HEATMAP_DATA: number[][] = DAYS_FR.map((_, di) =>
-  Array.from({ length: 24 }, (__, hi) => {
-    // morning spike, lunchtime dip, afternoon peak, night low
-    const base = Math.sin((hi / 23) * Math.PI) * 60;
-    const noise = Math.random() * 30;
-    const critique_spike = (di === 3 && (hi === 9 || hi === 17)) ? 40 : 0;
-    return Math.min(100, Math.max(0, Math.round(base + noise + critique_spike)));
-  })
-);
-
-function heatColor(v: number): string {
-  if (v === 0)  return "#18181b";
-  if (v < 15)   return "#1f1316";
-  if (v < 30)   return "#3b1219";
-  if (v < 50)   return "#6b1d1d";
-  if (v < 70)   return "#991b1b";
-  if (v < 85)   return "#dc2626";
-  return "#ef4444";
-}
-
-// ── Analyses view ──────────────────────────────────────────────────────────────
-
-function AnalysesView() {
-  const [anomalyPulse, setAnomalyPulse] = useState(true);
-  const [hoveredCell, setHoveredCell]   = useState<{ d: number; h: number; v: number } | null>(null);
-
-  useEffect(() => {
-    const t = setInterval(() => setAnomalyPulse((p) => !p), 900);
-    return () => clearInterval(t);
-  }, []);
-
-  const HOURS = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, "0")}h`);
-
-  return (
-    <main
-      className="flex-1 overflow-y-auto px-6 py-5 space-y-5"
-      style={{ scrollbarWidth: "none" } as React.CSSProperties}
-    >
-      {/* ── Page title ── */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-violet-600/20 border border-violet-600/30 flex items-center justify-center flex-shrink-0">
-            <BarChart2 size={15} className="text-violet-400" />
-          </div>
-          <div>
-            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Analyses Globale & Métriques de Sécurité</h2>
-            <p className="text-[11px] text-zinc-600 font-mono mt-0.5">Période : 7 derniers jours — Mise à jour : {new Date().toLocaleTimeString("fr-FR")}</p>
-          </div>
-        </div>
-        <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600/10 border border-blue-600/25 text-blue-400 hover:bg-blue-600/20 transition-all">
-          <Download size={12} />Exporter le rapport
-        </button>
-      </div>
-
-      {/* ── ROW 1 — Advanced metric cards ── */}
-      <section className="grid grid-cols-3 gap-4">
-
-        {/* Card 1 — Top Attaquant */}
-        <div className="bg-card border border-red-900/40 rounded-lg p-5 flex flex-col gap-4 relative overflow-hidden group hover:border-red-700/50 transition-colors">
-          {/* glow */}
-          <div className="absolute inset-0 bg-gradient-to-br from-red-950/30 via-transparent to-transparent pointer-events-none" />
-          <div className="flex items-start justify-between relative">
-            <div className="w-9 h-9 rounded-lg bg-red-600/15 border border-red-600/25 flex items-center justify-center">
-              <Crosshair size={17} className="text-red-400" />
-            </div>
-            <span className="flex items-center gap-1 text-[10px] font-mono bg-red-500/10 text-red-400 px-2 py-0.5 rounded-full border border-red-500/20">
-              <span className="w-1 h-1 rounded-full bg-red-500 animate-pulse" />ACTIF
-            </span>
-          </div>
-          <div className="relative">
-            <p className="text-[10px] text-zinc-600 uppercase tracking-widest font-semibold mb-2">Top Attaquant</p>
-            <p className="text-xl font-mono font-bold text-red-400 tracking-tight">192.168.1.150</p>
-            <div className="flex items-end gap-2 mt-2">
-              <span className="text-3xl font-bold text-foreground">412</span>
-              <span className="text-xs text-zinc-500 mb-1">tentatives malveillantes</span>
-            </div>
-            <div className="mt-3 w-full bg-zinc-800 rounded-full h-1.5">
-              <div className="bg-gradient-to-r from-red-700 to-red-500 h-1.5 rounded-full" style={{ width: "82%" }} />
-            </div>
-            <div className="flex justify-between mt-1">
-              <span className="text-[10px] font-mono text-zinc-500">0</span>
-              <span className="text-[10px] font-mono text-red-500">82% du seuil</span>
-              <span className="text-[10px] font-mono text-zinc-500">500</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Card 2 — Latence réseau */}
-        <div className="bg-card border border-border rounded-lg p-5 flex flex-col gap-4 relative overflow-hidden hover:border-zinc-600 transition-colors">
-          <div className="absolute inset-0 bg-gradient-to-br from-blue-950/20 via-transparent to-transparent pointer-events-none" />
-          <div className="flex items-start justify-between relative">
-            <div className="w-9 h-9 rounded-lg bg-blue-600/15 border border-blue-600/25 flex items-center justify-center">
-              <Zap size={17} className="text-blue-400" />
-            </div>
-            <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
-              <TrendingDown size={11} />−3ms vs hier
-            </span>
-          </div>
-          <div className="relative">
-            <p className="text-[10px] text-zinc-600 uppercase tracking-widest font-semibold mb-2">Latence Réseau Moy.</p>
-            <div className="flex items-end gap-2">
-              <span className="text-4xl font-bold font-mono text-blue-400">14</span>
-              <span className="text-lg font-mono text-zinc-500 mb-1">ms</span>
-            </div>
-            <p className="text-[11px] text-zinc-600 mt-2">Pic : <span className="text-zinc-400 font-mono">38ms</span> à 09h12 — Seuil d'alerte : <span className="text-amber-400 font-mono">50ms</span></p>
-            {/* Sparkline bars */}
-            <div className="flex items-end gap-0.5 mt-3 h-8">
-              {[10, 12, 9, 14, 38, 18, 13, 11, 14, 16, 12, 14].map((v, i) => (
-                <div key={i} className="flex-1 rounded-sm transition-all"
-                  style={{ height: `${Math.round((v / 40) * 100)}%`, backgroundColor: v > 30 ? "#f59e0b" : "#3b82f6", opacity: 0.7 }} />
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Card 3 — Anomalies IA */}
-        <div className="bg-card border border-border rounded-lg p-5 flex flex-col gap-4 relative overflow-hidden hover:border-amber-700/40 transition-colors">
-          <div className="absolute inset-0 bg-gradient-to-br from-amber-950/20 via-transparent to-transparent pointer-events-none" />
-          <div className="flex items-start justify-between relative">
-            <div className="w-9 h-9 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
-              <BrainCircuit size={17} className="text-amber-400" />
-            </div>
-            <span
-              className="text-[10px] font-mono font-bold text-amber-400 transition-opacity duration-500"
-              style={{ opacity: anomalyPulse ? 1 : 0.3 }}
-            >
-              ● ALERTE IA
-            </span>
-          </div>
-          <div className="relative">
-            <p className="text-[10px] text-zinc-600 uppercase tracking-widest font-semibold mb-2">Anomalies Détectées par l'IA</p>
-            <div className="flex items-end gap-2">
-              <span className="text-4xl font-bold text-amber-400">3</span>
-              <span className="text-xs text-zinc-500 mb-1">comportements anormaux</span>
-            </div>
-            <div className="mt-3 space-y-1.5">
-              {[
-                { label: "Brute-force SSH progressif", sev: "CRITIQUE" },
-                { label: "Exfiltration données suspecte", sev: "CRITIQUE" },
-                { label: "Escalade de privilèges",  sev: "AVERTISSEMENT" },
-              ].map(({ label, sev }) => (
-                <div key={label} className="flex items-center gap-2">
-                  <span className={`w-1 h-1 rounded-full flex-shrink-0 ${sev === "CRITIQUE" ? "bg-red-500" : "bg-amber-500"}`} />
-                  <span className="text-[11px] text-zinc-400 truncate">{label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── ROW 2 — Charts ── */}
-      <section className="grid grid-cols-2 gap-4">
-
-        {/* Multi-line: Échecs vs Succès */}
-        <div className="bg-card border border-border rounded-lg p-5">
-          <div className="flex items-start justify-between mb-5">
-            <div>
-              <h3 className="text-sm font-semibold">Échecs vs Succès de Connexion</h3>
-              <p className="text-[11px] text-zinc-600 mt-0.5">Comparaison sur les 7 derniers jours</p>
-            </div>
-            <div className="flex items-center gap-4">
-              {([["Échecs", "#ef4444"], ["Succès", "#10b981"]] as const).map(([l, col]) => (
-                <span key={l} className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-                  <span className="w-3 h-0.5 rounded-full" style={{ backgroundColor: col }} />{l}
-                </span>
-              ))}
-            </div>
-          </div>
-          <ResponsiveContainer width="100%" height={210}>
-            <LineChart data={ECHECS_SUCCES} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="lgEchecs" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#ef4444" stopOpacity={0.15} />
-                  <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-              <XAxis dataKey="jour" tick={{ fill: "#52525b", fontSize: 10 }} tickLine={false} axisLine={false} />
-              <YAxis tick={{ fill: "#52525b", fontSize: 10 }} tickLine={false} axisLine={false} />
-              <Tooltip
-                contentStyle={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: "8px", fontSize: 11, fontFamily: "monospace" }}
-                labelStyle={{ color: "#a1a1aa" }}
-                itemStyle={{ color: "#e4e4e7" }}
-              />
-              <Line type="monotone" dataKey="succes" name="Succès" stroke="#10b981" strokeWidth={2} dot={{ fill: "#10b981", r: 3, strokeWidth: 0 }} activeDot={{ r: 5 }} />
-              <Line type="monotone" dataKey="echecs" name="Échecs" stroke="#ef4444" strokeWidth={2} dot={{ fill: "#ef4444", r: 3, strokeWidth: 0 }} activeDot={{ r: 5 }} strokeDasharray="5 3" />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Horizontal bar: Top services ciblés */}
-        <div className="bg-card border border-border rounded-lg p-5">
-          <div className="mb-5">
-            <h3 className="text-sm font-semibold">Top Services Ciblés</h3>
-            <p className="text-[11px] text-zinc-600 mt-0.5">Classement par nombre de tentatives d'attaque</p>
-          </div>
-          <div className="space-y-4">
-            {SERVICES_CIBLES.map((s, i) => {
-              const pct = Math.round((s.hits / SERVICES_CIBLES[0].hits) * 100);
-              return (
-                <div key={s.service}>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-mono text-zinc-500 w-4 text-right">{i + 1}</span>
-                      <span className="text-[11px] font-mono text-zinc-300">{s.service}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-mono font-semibold" style={{ color: s.color }}>{s.hits}</span>
-                      <span className="text-[10px] text-zinc-500 font-mono w-8 text-right">{pct}%</span>
-                    </div>
-                  </div>
-                  <div className="w-full bg-zinc-800/60 rounded-full h-2 relative overflow-hidden">
-                    <div
-                      className="h-2 rounded-full transition-all duration-700"
-                      style={{ width: `${pct}%`, backgroundColor: s.color, boxShadow: `0 0 6px ${s.color}55` }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Total footer */}
-          <div className="mt-5 pt-4 border-t border-border flex items-center justify-between">
-            <span className="text-[11px] text-zinc-600">Total tentatives</span>
-            <span className="text-sm font-bold font-mono text-foreground">
-              {SERVICES_CIBLES.reduce((s, d) => s + d.hits, 0).toLocaleString("fr-FR")}
-            </span>
-          </div>
-        </div>
-      </section>
-
-      {/* ── ROW 3 — Heatmap ── */}
-      <section className="bg-card border border-border rounded-lg p-5">
-        <div className="flex items-start justify-between mb-5">
-          <div>
-            <h3 className="text-sm font-semibold">Intensité des Actions par Heure</h3>
-            <p className="text-[11px] text-zinc-600 mt-0.5">Matrice activité — 7 jours × 24 heures · Survolez une cellule pour le détail</p>
-          </div>
-          {/* Legend */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-zinc-600 font-mono mr-1">Faible</span>
-            {[0, 20, 40, 60, 80, 100].map((v) => (
-              <div key={v} className="w-4 h-4 rounded-sm" style={{ backgroundColor: heatColor(v) }} />
-            ))}
-            <span className="text-[10px] text-zinc-600 font-mono ml-1">Élevé</span>
-          </div>
-        </div>
-
-        {/* Hour labels */}
-        <div className="flex">
-          <div className="w-12 flex-shrink-0" />
-          <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(24, 1fr)` }}>
-            {HOURS.map((h, i) => (
-              <div key={h} className="text-center">
-                <span className="text-[8px] font-mono text-zinc-500">{i % 3 === 0 ? h : ""}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Grid rows */}
-        <div className="space-y-1 mt-1 relative">
-          {HEATMAP_DATA.map((row, di) => (
-            <div key={di} className="flex items-center gap-0">
-              {/* Day label */}
-              <div className="w-12 flex-shrink-0 pr-2 text-right">
-                <span className="text-[10px] font-mono text-zinc-600">{DAYS_FR[di]}</span>
-              </div>
-              {/* Cells */}
-              <div className="flex-1 grid gap-0.5" style={{ gridTemplateColumns: `repeat(24, 1fr)` }}>
-                {row.map((v, hi) => (
-                  <div
-                    key={hi}
-                    className="rounded-sm cursor-crosshair transition-all duration-100 hover:ring-1 hover:ring-white/20"
-                    style={{ height: 18, backgroundColor: heatColor(v), opacity: hoveredCell?.d === di && hoveredCell?.h === hi ? 1 : 0.92 }}
-                    onMouseEnter={() => setHoveredCell({ d: di, h: hi, v })}
-                    onMouseLeave={() => setHoveredCell(null)}
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
-
-          {/* Hover tooltip */}
-          {hoveredCell && (
-            <div className="absolute right-0 top-0 pointer-events-none z-10">
-              <div className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-[11px] font-mono shadow-xl">
-                <p className="text-zinc-400">{DAYS_FR[hoveredCell.d]} — {HOURS[hoveredCell.h]}</p>
-                <p className="text-white font-semibold mt-0.5">
-                  Intensité : <span style={{ color: heatColor(hoveredCell.v) }}>{hoveredCell.v}</span>/100
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Heatmap footer note */}
-        <p className="text-[10px] font-mono text-zinc-500 mt-4">
-          Pic détecté : <span className="text-red-500">Jeudi 09h & 17h</span> — Valeurs normalisées sur la semaine
-        </p>
-      </section>
-    </main>
-  );
-}
-
 // ── Rapports data & view ───────────────────────────────────────────────────────
 
 type ReportStatus = "Prêt" | "En cours" | "Échec";
@@ -1268,6 +936,30 @@ const STATUS_STYLE: Record<ReportStatus, { pill: string; dot: string; label: str
 };
 
 const SERVICES_LIST = ["Tous les services", "sshd.service", "systemd-logind", "sudo", "nginx", "auditd", "cron", "kernel", "firewalld", "fail2ban", "postgresql"];
+
+function ReportSortButton({
+  field,
+  label,
+  sortField,
+  sortAsc,
+  onSort,
+}: {
+  field: keyof Report;
+  label: string;
+  sortField: keyof Report;
+  sortAsc: boolean;
+  onSort: (field: keyof Report) => void;
+}) {
+  return (
+    <button onClick={() => onSort(field)} className="flex items-center gap-1 group hover:text-zinc-300 transition-colors">
+      {label}
+      <span className="flex flex-col opacity-40 group-hover:opacity-80">
+        <ChevronUp size={8} className={sortField === field && sortAsc ? "opacity-100 text-blue-400" : ""} />
+        <ChevronDown size={8} className={sortField === field && !sortAsc ? "opacity-100 text-blue-400" : ""} style={{ marginTop: -2 }} />
+      </span>
+    </button>
+  );
+}
 
 function RapportsView() {
   // Form state
@@ -1324,16 +1016,6 @@ function RapportsView() {
     if (sortField === field) setSortAsc((p) => !p);
     else { setSortField(field); setSortAsc(true); }
   };
-
-  const SortBtn = ({ field, label }: { field: keyof Report; label: string }) => (
-    <button onClick={() => toggleSort(field)} className="flex items-center gap-1 group hover:text-zinc-300 transition-colors">
-      {label}
-      <span className="flex flex-col opacity-40 group-hover:opacity-80">
-        <ChevronUp size={8} className={sortField === field && sortAsc ? "opacity-100 text-blue-400" : ""} />
-        <ChevronDown size={8} className={sortField === field && !sortAsc ? "opacity-100 text-blue-400" : ""} style={{ marginTop: -2 }} />
-      </span>
-    </button>
-  );
 
   const readyCnt   = reports.filter((r) => r.statut === "Prêt").length;
   const pendingCnt = reports.filter((r) => r.statut === "En cours").length;
@@ -1581,10 +1263,10 @@ function RapportsView() {
             className="grid gap-3 px-5 py-2.5 border-b border-border bg-muted/30 text-[10px] font-semibold text-zinc-600 uppercase tracking-widest"
             style={{ gridTemplateColumns: "2fr 1.2fr 80px 100px 110px" }}
           >
-            <SortBtn field="nom"     label="Nom du fichier" />
-            <SortBtn field="debut"   label="Période"        />
-            <SortBtn field="taille"  label="Taille"         />
-            <SortBtn field="statut"  label="Statut"         />
+            <ReportSortButton field="nom" label="Nom du fichier" sortField={sortField} sortAsc={sortAsc} onSort={toggleSort} />
+            <ReportSortButton field="debut" label="Période" sortField={sortField} sortAsc={sortAsc} onSort={toggleSort} />
+            <ReportSortButton field="taille" label="Taille" sortField={sortField} sortAsc={sortAsc} onSort={toggleSort} />
+            <ReportSortButton field="statut" label="Statut" sortField={sortField} sortAsc={sortAsc} onSort={toggleSort} />
             <span>Actions</span>
           </div>
 
@@ -2178,6 +1860,8 @@ const SETTINGS_TABS = [
   "Général",
 ] as const;
 
+type SettingsTab = typeof SETTINGS_TABS[number];
+
 const MONITORED_MACHINES = [
   {
     title: "Machine Locale (Kali OS)",
@@ -2202,8 +1886,224 @@ const MONITORED_MACHINES = [
   },
 ];
 
+function SecurityAccessSettings() {
+  const [mfaRequired, setMfaRequired] = useState(true);
+  const [shortSessions, setShortSessions] = useState(true);
+  const [profileAudit, setProfileAudit] = useState(true);
+
+  const rules = [
+    {
+      label: "Double validation administrateur",
+      detail: "Obligatoire pour les opérations sensibles",
+      enabled: mfaRequired,
+      setEnabled: setMfaRequired,
+    },
+    {
+      label: "Sessions courtes pour consoles distantes",
+      detail: "Expiration simulée après 30 minutes d'inactivité",
+      enabled: shortSessions,
+      setEnabled: setShortSessions,
+    },
+    {
+      label: "Journaliser les actions du profil",
+      detail: "Trace les changements de mot de passe et les accès SSH",
+      enabled: profileAudit,
+      setEnabled: setProfileAudit,
+    },
+  ];
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <section className="overflow-hidden rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
+        <div className="flex items-center gap-2.5 border-b border-border bg-[#0d0d10] px-5 py-3.5">
+          <ShieldCheck size={15} className="text-blue-400" />
+          <h3 className="text-sm font-semibold">Règles de sécurité administrateur</h3>
+        </div>
+        <div className="divide-y divide-border/40">
+          {rules.map(({ label, detail, enabled, setEnabled }) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => setEnabled((value) => !value)}
+              className="flex w-full items-center justify-between gap-5 px-5 py-4 text-left transition hover:bg-blue-500/[0.06] hover:shadow-[inset_2px_0_0_rgba(59,130,246,0.45)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+              aria-pressed={enabled}
+            >
+              <span>
+                <span className="block text-sm font-semibold text-zinc-100">{label}</span>
+                <span className="mt-1 block text-xs font-mono text-zinc-500">{detail}</span>
+              </span>
+              <span
+                className={`relative h-6 w-11 flex-shrink-0 rounded-full border transition ${
+                  enabled ? "border-emerald-500/50 bg-emerald-500/25" : "border-zinc-700 bg-zinc-900"
+                }`}
+              >
+                <span
+                  className={`absolute top-1 h-4 w-4 rounded-full transition ${
+                    enabled ? "left-6 bg-emerald-300 shadow-lg shadow-emerald-500/25" : "left-1 bg-zinc-600"
+                  }`}
+                />
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <aside className="rounded-xl border border-zinc-800/80 bg-card/95 p-5 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">
+          Simulation d'accès
+        </p>
+        <div className="mt-4 space-y-3">
+          {[
+            ["Tentatives refusées", "12", "text-red-400"],
+            ["Sessions actives", "2", "text-emerald-400"],
+            ["Dernier contrôle", "Aujourd'hui 11:28", "text-blue-400"],
+          ].map(([label, value, color]) => (
+            <div key={label} className="flex items-center justify-between gap-4">
+              <span className="text-[11px] text-zinc-600">{label}</span>
+              <span className={`text-[11px] font-mono font-semibold ${color}`}>{value}</span>
+            </div>
+          ))}
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function AuditAiSettings() {
+  const [enabled, setEnabled] = useState(true);
+  const [sensitivity, setSensitivity] = useState("Équilibré");
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <section className="overflow-hidden rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
+        <div className="flex items-center gap-2.5 border-b border-border bg-[#0d0d10] px-5 py-3.5">
+          <BrainCircuit size={15} className="text-violet-400" />
+          <h3 className="text-sm font-semibold">Assistant IA pour l'audit</h3>
+        </div>
+
+        <div className="space-y-5 px-5 py-5">
+          <button
+            type="button"
+            onClick={() => setEnabled((value) => !value)}
+            className="flex w-full items-center justify-between gap-4 rounded-lg border border-border bg-[#0d0d10] p-4 text-left transition hover:border-violet-500/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/35"
+            aria-pressed={enabled}
+          >
+            <span>
+              <span className="block text-sm font-medium text-zinc-100">
+                Activer l'aide IA sur les journaux d'audit
+              </span>
+              <span className="mt-1 block text-[11px] text-zinc-500">
+                Signale les comportements inhabituels dans l'historique des actions
+              </span>
+            </span>
+            <span
+              className={`relative h-6 w-11 flex-shrink-0 rounded-full border transition ${
+                enabled ? "border-violet-500/50 bg-violet-500/30" : "border-zinc-700 bg-zinc-900"
+              }`}
+            >
+              <span
+                className={`absolute top-1 h-4 w-4 rounded-full transition ${
+                  enabled ? "left-6 bg-violet-300 shadow-lg shadow-violet-500/30" : "left-1 bg-zinc-600"
+                }`}
+              />
+            </span>
+          </button>
+
+          <label className="block">
+            <span className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+              Sensibilité de détection
+            </span>
+            <select
+              value={sensitivity}
+              onChange={(event) => setSensitivity(event.target.value)}
+              className="w-full appearance-none rounded-lg border border-border bg-muted px-3 py-3 text-xs text-zinc-200 outline-none transition focus:border-violet-500/45 focus:ring-1 focus:ring-violet-500/25"
+            >
+              <option>Conservateur</option>
+              <option>Équilibré</option>
+              <option>Agressif</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <aside className="rounded-xl border border-zinc-800/80 bg-card/95 p-5 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">
+          Détections simulées
+        </p>
+        <div className="mt-4 space-y-3">
+          {[
+            ["Brute-force SSH progressif", "Critique", "text-red-400"],
+            ["sudo répété hors plage habituelle", "Avertissement", "text-amber-400"],
+            ["Connexion admin depuis nouvelle IP", "À vérifier", "text-blue-400"],
+          ].map(([label, value, color]) => (
+            <div key={label} className="rounded-lg border border-zinc-800 bg-[#0d0d10] px-3 py-2.5">
+              <p className="truncate text-xs font-medium text-zinc-300">{label}</p>
+              <p className={`mt-1 text-[10px] font-mono font-semibold ${color}`}>{value}</p>
+            </div>
+          ))}
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function GeneralSettings() {
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [retentionDays, setRetentionDays] = useState("90 jours");
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
+      <div className="flex items-center gap-2.5 border-b border-border bg-[#0d0d10] px-5 py-3.5">
+        <Settings size={15} className="text-blue-400" />
+        <h3 className="text-sm font-semibold">Préférences générales d'audit</h3>
+      </div>
+
+      <div className="grid gap-5 px-5 py-5 md:grid-cols-2">
+        <label className="block">
+          <span className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+            Conservation des logs
+          </span>
+          <select
+            value={retentionDays}
+            onChange={(event) => setRetentionDays(event.target.value)}
+            className="w-full appearance-none rounded-lg border border-border bg-muted px-3 py-3 text-xs text-zinc-200 outline-none transition focus:border-blue-500/45 focus:ring-1 focus:ring-blue-500/25"
+          >
+            <option>30 jours</option>
+            <option>90 jours</option>
+            <option>180 jours</option>
+            <option>365 jours</option>
+          </select>
+        </label>
+
+        <button
+          type="button"
+          onClick={() => setAutoRefresh((value) => !value)}
+          className="flex items-center justify-between gap-4 rounded-lg border border-border bg-[#0d0d10] p-4 text-left transition hover:border-blue-500/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+          aria-pressed={autoRefresh}
+        >
+          <span>
+            <span className="block text-sm font-medium text-zinc-100">Actualisation automatique</span>
+            <span className="mt-1 block text-[11px] text-zinc-500">Rafraîchit les flux d'audit en arrière-plan</span>
+          </span>
+          <span
+            className={`relative h-6 w-11 flex-shrink-0 rounded-full border transition ${
+              autoRefresh ? "border-blue-500/50 bg-blue-500/25" : "border-zinc-700 bg-zinc-900"
+            }`}
+          >
+            <span
+              className={`absolute top-1 h-4 w-4 rounded-full transition ${
+                autoRefresh ? "left-6 bg-blue-300 shadow-lg shadow-blue-500/25" : "left-1 bg-zinc-600"
+              }`}
+            />
+          </span>
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function ParametresView() {
-  const [behaviorAnalysis, setBehaviorAnalysis] = useState(true);
+  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("Serveurs Distants & Cloud");
   const maskedToken = "mel_agt_sk_••••••••••••••••••••••••••••••••";
 
   return (
@@ -2219,18 +2119,19 @@ function ParametresView() {
           <div>
             <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Configurations & Paramètres</h2>
             <p className="mt-0.5 text-xs font-mono text-zinc-500">
-              Gestion des agents, accès distants et modules intelligents
+              Gestion des agents, accès distants et aide IA à l'audit
             </p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)] p-1">
           {SETTINGS_TABS.map((tab) => {
-            const active = tab === "Serveurs Distants & Cloud";
+            const active = tab === activeSettingsTab;
             return (
               <button
                 key={tab}
                 type="button"
+                onClick={() => setActiveSettingsTab(tab)}
                 className={`rounded-md px-3 py-2 text-xs font-medium transition-all ${
                   active
                     ? "bg-blue-600/20 text-blue-300 shadow-inner shadow-blue-950/40"
@@ -2244,6 +2145,7 @@ function ParametresView() {
         </div>
       </div>
 
+      {activeSettingsTab === "Serveurs Distants & Cloud" ? (
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
         <section className="space-y-5">
           <div className="overflow-hidden rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
@@ -2340,60 +2242,9 @@ function ParametresView() {
         </section>
 
         <aside className="space-y-5">
-          <div className="rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)] p-5">
-            <div className="mb-5 flex items-center gap-3">
-              <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-violet-600/30 bg-violet-600/15">
-                <Cpu size={17} className="text-violet-400" />
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold">Configuration IA</h3>
-                <p className="mt-0.5 text-xs font-mono text-zinc-500">
-                  Analyse locale et détection comportementale
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setBehaviorAnalysis((enabled) => !enabled)}
-              className="flex w-full items-center justify-between gap-4 rounded-lg border border-border bg-[#0d0d10] p-4 text-left transition hover:border-violet-500/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/35"
-              aria-pressed={behaviorAnalysis}
-            >
-              <span>
-                <span className="block text-sm font-medium text-zinc-100">
-                  Activer l'Analyse Comportementale Locale
-                </span>
-                <span className="mt-1 block text-[11px] text-zinc-600">
-                  Optimisé pour 8 Go RAM
-                </span>
-              </span>
-              <span
-                className={`relative h-6 w-11 flex-shrink-0 rounded-full border transition ${
-                  behaviorAnalysis
-                    ? "border-violet-500/50 bg-violet-500/30"
-                    : "border-zinc-700 bg-zinc-900"
-                }`}
-              >
-                <span
-                  className={`absolute top-1 h-4 w-4 rounded-full transition ${
-                    behaviorAnalysis
-                      ? "left-6 bg-violet-300 shadow-lg shadow-violet-500/30"
-                      : "left-1 bg-zinc-600"
-                  }`}
-                />
-              </span>
-            </button>
-
-            <div className="mt-4 rounded-lg border border-violet-900/30 bg-violet-500/5 px-4 py-3">
-              <p className="text-[11px] leading-relaxed text-zinc-500">
-                Le moteur local priorise les modèles légers pour limiter l'empreinte mémoire tout en surveillant les écarts de comportement.
-              </p>
-            </div>
-          </div>
-
           <div className="rounded-lg border border-border bg-[#0d0d10] p-5">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">
-              État Cloud
+              État d'ingestion
             </p>
             <div className="mt-4 space-y-3">
               {[
@@ -2410,6 +2261,13 @@ function ParametresView() {
           </div>
         </aside>
       </div>
+      ) : activeSettingsTab === "Sécurité & Accès" ? (
+        <SecurityAccessSettings />
+      ) : activeSettingsTab === "Moteur d'IA" ? (
+        <AuditAiSettings />
+      ) : (
+        <GeneralSettings />
+      )}
     </main>
   );
 }
@@ -2442,8 +2300,6 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
         <HistoriqueLiveView logs={logs} playing={playing} setPlaying={setPlaying} onClear={handleClear} />
       ) : activeNav === "dashboard" ? (
         <DashboardView logs={logs} playing={playing} setPlaying={setPlaying} />
-      ) : activeNav === "analyses" ? (
-        <AnalysesView />
       ) : activeNav === "rapports" ? (
         <RapportsView />
       ) : activeNav === "parametres" ? (
