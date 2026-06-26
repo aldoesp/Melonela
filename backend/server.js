@@ -1,23 +1,62 @@
 require('dotenv').config();
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
+const { Server } = require('socket.io');
 const authRoutes = require('./routes/authRoutes');
-//const auditRoutes = require('./routes/auditRoutes');
+const userActionRoutes = require('./routes/userActionRoutes');
+const auditLogRoutes = require('./routes/auditLogRoutes');
+const profileRoutes = require('./routes/profileRoutes');
+const userRoutes = require('./routes/userRoutes');
+const exportRoutes = require('./routes/exportRoutes');
+const ingestRoutes = require('./routes/ingestRoutes');
+const { ensureUserActionTable } = require('./services/userActionService');
+const { ensureSystemEventLogTable } = require('./services/auditLogService');
+const { ensureUserSchema } = require('./services/schemaService');
+const { setSocketServer } = require('./realtime/socket');
 const errorHandler = require('./middlewares/errorHandler');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:4173',
+  'http://127.0.0.1:4173',
+];
+
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: allowedOrigins,
+    credentials: true,
+  },
+});
+
+setSocketServer(io);
+
 // ─── Middlewares globaux ───
 app.use(cors({
-  origin: 'http://localhost:5173',   // ← URL de ton Frontend !
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`Origine non autorisée par CORS: ${origin}`));
+  },
   credentials: true,
 }));
 app.use(express.json());             // ← Parse le JSON du body
 
 // ─── Routes ───
 app.use('/api/auth', authRoutes);
-//app.use('/api/audit', auditRoutes);
+app.use('/api/user-actions', userActionRoutes);
+app.use('/api/audit-logs', auditLogRoutes);
+app.use('/api/profile', profileRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/export', exportRoutes);
+app.use('/api/ingest', ingestRoutes);
 
 // ─── Route de test ───
 app.get('/api/health', (req, res) => {
@@ -27,6 +66,17 @@ app.get('/api/health', (req, res) => {
 // ─── Gestionnaire d'erreurs global ───
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-  console.log(`🚀 Serveur Melonela démarré sur http://localhost:${PORT}`);
-});
+Promise.all([
+  ensureUserSchema(),
+  ensureUserActionTable(),
+  ensureSystemEventLogTable(),
+])
+  .then(() => {
+    server.listen(PORT, () => {
+      console.log(`Serveur Melonela démarré sur http://localhost:${PORT}`);
+    });
+  })
+  .catch((error) => {
+    console.error('Impossible de préparer les tables Melonela:', error);
+    process.exit(1);
+  });

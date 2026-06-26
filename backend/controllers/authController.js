@@ -4,7 +4,7 @@ const login = async (req, res, next) => {
   try {
     const { username, password } = req.body;
 
-    const result = await authService.authenticateUser(username, password);
+    const result = await authService.authenticateUser(username, password, req);
 
     res.json(result);
 
@@ -18,11 +18,11 @@ const login = async (req, res, next) => {
 
 const register = async (req, res, next) => {
   try {
-    const { username, password } = req.body; // role retiré
+    const { username, password, firstName, lastName, email } = req.body; // role retiré
 
     // Optionnel : Valider les entrées ici ou avec un validateur comme Joi/Zod
 
-    const newUser = await authService.createUser(username, password); // role retiré de l'appel
+    const newUser = await authService.createUser(username, password, req, { firstName, lastName, email }); // role retiré de l'appel
 
     res.status(201).json({
       message: 'Utilisateur créé avec succès',

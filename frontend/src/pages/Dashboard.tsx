@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Activity, BarChart2, FileText, Settings,
   Search, Bell, Shield, ChevronDown, ChevronRight, Play, Pause,
   Download, TrendingUp, TrendingDown, Server, AlertTriangle,
-  XCircle, LogIn, LogOut, Trash2, Filter, Terminal, Wifi, Hash,
+  XCircle, LogOut, Trash2, Filter, Terminal, Wifi, Hash,
   BrainCircuit,
   FileDown, FileCog, CalendarDays, CheckSquare, Square,
   Clock, HardDrive, CheckCircle2, Loader2, XCircle as XCircleIcon,
@@ -14,27 +14,37 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
+import {
+  deleteUser,
+  getExportUrl,
+  getCurrentUser,
+  getMyUserActions,
+  getProfile,
+  getUsers,
+  trackUserAction,
+  updatePassword,
+  updateProfile,
+  updateUser,
+} from "../api/authApi";
+import type { UserActionLog, UserProfile } from "../api/authApi";
+import {
+  connectAuditLogSocket,
+  filterAuditLogs,
+  getAuditLogs,
+  getJournalctlLiveStatus,
+  searchAuditLogs,
+  startJournalctlLive,
+  stopJournalctlLive,
+  type AuditLog,
+  type AuditLogPagination,
+  type AuditLogQuery,
+  type JournalctlLiveStatus,
+} from "../services/auditLogs";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 type Severity = "CRITIQUE" | "AVERTISSEMENT" | "INFO";
-type NavId = "dashboard" | "live" | "rapports" | "parametres" | "profil" | "sessions" | "ssh";
-
-interface LogEntry {
-  id: number;
-  heure: string;
-  service: string;
-  utilisateur: string;
-  action: string;
-  dangerosite: Severity;
-  ipSource: string;
-  details: {
-    metadata?: Record<string, unknown>;
-    erreur?: Record<string, unknown>;
-    reseau?: Record<string, unknown>;
-    [k: string]: unknown;
-  };
-}
+type NavId = "dashboard" | "live" | "rapports" | "parametres" | "profil" | "sessions" | "ssh" | "administration";
 
 // ── Palette ────────────────────────────────────────────────────────────────────
 
@@ -50,160 +60,110 @@ const NAV_ITEMS: { id: NavId; icon: React.ElementType; label: string }[] = [
   { id: "dashboard",  icon: LayoutDashboard, label: "Tableau de bord"  },
   { id: "live",       icon: Activity,        label: "Historique Live"  },
   { id: "rapports",   icon: FileText,        label: "Rapports"         },
+  { id: "sessions",   icon: History,         label: "Journal d'actions"},
+  { id: "administration", icon: UserCog,     label: "Administration"   },
   { id: "parametres", icon: Settings,        label: "Paramètres"       },
 ];
 
-// ── Static chart data ──────────────────────────────────────────────────────────
+const NAV_LABELS: Record<NavId, string> = {
+  dashboard: "Tableau de bord",
+  live: "Historique Live",
+  rapports: "Rapports",
+  parametres: "Paramètres",
+  profil: "Mon Profil",
+  sessions: "Journal d'actions",
+  ssh: "Sécurité & Clés SSH",
+  administration: "Administration",
+};
 
-const AREA_DATA = [
-  { h: "00h", i: 320,  a: 45,  c: 2  }, { h: "01h", i: 210,  a: 30,  c: 1  },
-  { h: "02h", i: 180,  a: 22,  c: 0  }, { h: "03h", i: 150,  a: 18,  c: 3  },
-  { h: "04h", i: 190,  a: 25,  c: 1  }, { h: "05h", i: 260,  a: 38,  c: 0  },
-  { h: "06h", i: 480,  a: 62,  c: 4  }, { h: "07h", i: 720,  a: 95,  c: 2  },
-  { h: "08h", i: 1050, a: 140, c: 5  }, { h: "09h", i: 1380, a: 182, c: 8  },
-  { h: "10h", i: 1520, a: 205, c: 6  }, { h: "11h", i: 1640, a: 220, c: 11 },
-  { h: "12h", i: 1580, a: 198, c: 9  }, { h: "13h", i: 1420, a: 175, c: 7  },
-  { h: "14h", i: 1350, a: 168, c: 5  }, { h: "15h", i: 1490, a: 192, c: 8  },
-  { h: "16h", i: 1620, a: 218, c: 12 }, { h: "17h", i: 1780, a: 245, c: 14 },
-  { h: "18h", i: 1540, a: 210, c: 10 }, { h: "19h", i: 980,  a: 135, c: 6  },
-  { h: "20h", i: 740,  a: 98,  c: 4  }, { h: "21h", i: 560,  a: 72,  c: 3  },
-  { h: "22h", i: 420,  a: 55,  c: 2  }, { h: "23h", i: 350,  a: 48,  c: 1  },
-];
+const EVENT_LABELS: Record<string, string> = {
+  ssh_failed: "Échec SSH",
+  service_started: "Service démarré",
+  service_stopped: "Service arrêté",
+  system_error: "Erreur système",
+  system_event: "Événement système",
+};
 
-const DONUT_DATA = [
-  { name: "Info",          value: 89240, color: C.info },
-  { name: "Avertissement", value: 8812,  color: C.warn },
-  { name: "Critique",      value: 456,   color: C.crit },
-];
+const EVENT_TYPES = Object.entries(EVENT_LABELS).map(([value, label]) => ({ value, label }));
 
-// ── Seed logs ──────────────────────────────────────────────────────────────────
+const USER_ACTION_LABELS: Record<string, string> = {
+  LOGIN_SUCCESS: "Connexion réussie",
+  USER_REGISTERED: "Création du compte",
+  LOGOUT: "Déconnexion",
+  NAVIGATE: "Navigation",
+  VIEW_ACTION_JOURNAL: "Consultation du journal",
+  GENERATE_REPORT: "Génération de rapport",
+  EXPORT_REPORT: "Export de rapport",
+  REPORT_EXPORTED: "Export de rapport",
+  REPORT_DOWNLOADED: "Téléchargement de rapport",
+  CLEAR_LIVE_FEED: "Flux live vidé",
+  UPDATE_SETTINGS: "Paramètre modifié",
+  SETTINGS_UPDATED: "Paramètre modifié",
+  PROFILE_UPDATE: "Profil modifié",
+  PROFILE_UPDATED: "Profil modifié",
+  SSH_KEY_ACTION: "Action clé SSH",
+  PASSWORD_CHANGED: "Mot de passe modifié",
+  SSH_KEY_ADDED: "Clé SSH ajoutée",
+  SSH_KEY_DELETED: "Clé SSH supprimée",
+  USER_UPDATED: "Utilisateur modifié",
+  USER_DELETED: "Utilisateur désactivé",
+  ROLE_UPDATED: "Rôle modifié",
+  ADMIN_SECTION_VIEWED: "Administration consultée",
+  JOURNALCTL_COLLECTED: "Collecte journalctl",
+};
 
-const SEED: LogEntry[] = [
-  {
-    id: 1, heure: "19:40:02", service: "sshd.service", utilisateur: "root",
-    action: "Échec Connexion", dangerosite: "CRITIQUE", ipSource: "192.168.1.50",
-    details: {
-      metadata: { pid: 4821, port: 22, tentatives: 8, protocole: "SSH-2.0", duree_ms: 312 },
-      erreur:   { code: "AUTH_FAILURE", message: "Failed password for root from 192.168.1.50 port 52314 ssh2", type: "PermissionDenied" },
-      reseau:   { mac_source: "00:1A:2B:3C:4D:5E", interface: "eth0", vlan: 10, ttl: 64 },
-    },
-  },
-  {
-    id: 2, heure: "19:38:15", service: "systemd-logind", utilisateur: "aldoesp",
-    action: "Session Ouverte", dangerosite: "INFO", ipSource: "Local",
-    details: {
-      metadata: { session_id: "c12", uid: 1000, gid: 1000, tty: "pts/0" },
-      erreur:   null,
-      reseau:   { mac_source: "N/A", interface: "lo", vlan: null, ttl: null },
-    },
-  },
-  {
-    id: 3, heure: "19:35:40", service: "sudo", utilisateur: "aldoesp",
-    action: "apt update", dangerosite: "AVERTISSEMENT", ipSource: "Local",
-    details: {
-      metadata: { commande: "/usr/bin/apt update", tty: "pts/0", pwd: "/home/aldoesp", env: "LANG=fr_FR.UTF-8" },
-      erreur:   null,
-      reseau:   { mac_source: "N/A", interface: "lo", vlan: null, ttl: null },
-    },
-  },
-  {
-    id: 4, heure: "19:31:10", service: "nginx", utilisateur: "www-data",
-    action: "Requête 403", dangerosite: "AVERTISSEMENT", ipSource: "203.0.113.42",
-    details: {
-      metadata: { methode: "GET", uri: "/admin/.env", status: 403, user_agent: "python-requests/2.28.0" },
-      erreur:   { code: "FORBIDDEN", message: "Access denied to protected resource", type: "AuthorizationError" },
-      reseau:   { mac_source: "AA:BB:CC:DD:EE:FF", interface: "eth1", vlan: 20, ttl: 52 },
-    },
-  },
-  {
-    id: 5, heure: "19:28:55", service: "auditd", utilisateur: "root",
-    action: "Règle Audit Modifiée", dangerosite: "CRITIQUE", ipSource: "Local",
-    details: {
-      metadata: { op: "add_rule", key: "privileged", syscall: "execve", filter: "exit", action: "always" },
-      erreur:   { code: "RULE_CHANGE", message: "Audit rule modification detected on privileged syscall", type: "SecurityEvent" },
-      reseau:   { mac_source: "N/A", interface: "lo", vlan: null, ttl: null },
-    },
-  },
-  {
-    id: 6, heure: "19:24:18", service: "cron", utilisateur: "backup_usr",
-    action: "Tâche Exécutée", dangerosite: "INFO", ipSource: "Local",
-    details: {
-      metadata: { job: "/usr/local/bin/backup.sh", exit_code: 0, duree_ms: 4821, pid: 9912 },
-      erreur:   null,
-      reseau:   { mac_source: "N/A", interface: "lo", vlan: null, ttl: null },
-    },
-  },
-  {
-    id: 7, heure: "19:20:33", service: "kernel", utilisateur: "root",
-    action: "Module Chargé", dangerosite: "AVERTISSEMENT", ipSource: "Local",
-    details: {
-      metadata: { module: "nf_conntrack", version: "5.15.0-91-generic", vermagic: "5.15.0-91-generic SMP", taint: false },
-      erreur:   null,
-      reseau:   { mac_source: "N/A", interface: "lo", vlan: null, ttl: null },
-    },
-  },
-  {
-    id: 8, heure: "19:15:07", service: "firewalld", utilisateur: "root",
-    action: "Règle DROP", dangerosite: "CRITIQUE", ipSource: "203.0.113.88",
-    details: {
-      metadata: { proto: "TCP", dpt: 3306, src: "203.0.113.88", dst: "10.0.0.5", flags: "SYN", packets: 1 },
-      erreur:   { code: "PACKET_DROP", message: "Inbound TCP connection dropped by firewall policy", type: "NetworkBlock" },
-      reseau:   { mac_source: "DE:AD:BE:EF:00:11", interface: "eth0", vlan: 30, ttl: 47 },
-    },
-  },
-  {
-    id: 9, heure: "19:12:44", service: "fail2ban", utilisateur: "root",
-    action: "IP Bannie", dangerosite: "CRITIQUE", ipSource: "198.51.100.14",
-    details: {
-      metadata: { ip: "198.51.100.14", jail: "sshd", duree_ban: "3600s", tentatives: 10 },
-      erreur:   { code: "IP_BANNED", message: "IP banned after 10 failed attempts in sshd jail", type: "BruteForce" },
-      reseau:   { mac_source: "FF:EE:DD:CC:BB:AA", interface: "eth0", vlan: 10, ttl: 58 },
-    },
-  },
-  {
-    id: 10, heure: "19:08:31", service: "postgresql", utilisateur: "postgres",
-    action: "Connexion Refusée", dangerosite: "AVERTISSEMENT", ipSource: "10.0.0.25",
-    details: {
-      metadata: { database: "prod_db", port: 5432, ssl: true, pg_version: "15.2" },
-      erreur:   { code: "28P01", message: "password authentication failed for user \"api_user\"", type: "AuthError" },
-      reseau:   { mac_source: "11:22:33:44:55:66", interface: "eth1", vlan: 40, ttl: 64 },
-    },
-  },
-  {
-    id: 11, heure: "19:05:19", service: "sshd.service", utilisateur: "deploy",
-    action: "Connexion Réussie", dangerosite: "INFO", ipSource: "192.168.1.12",
-    details: {
-      metadata: { pid: 5102, port: 22, methode: "publickey", fingerprint: "SHA256:abc123xyz" },
-      erreur:   null,
-      reseau:   { mac_source: "AA:11:BB:22:CC:33", interface: "eth0", vlan: 10, ttl: 64 },
-    },
-  },
-  {
-    id: 12, heure: "19:01:05", service: "sudo", utilisateur: "sysadmin",
-    action: "systemctl restart", dangerosite: "AVERTISSEMENT", ipSource: "Local",
-    details: {
-      metadata: { commande: "systemctl restart nginx.service", tty: "pts/1", pwd: "/root", exit_code: 0 },
-      erreur:   null,
-      reseau:   { mac_source: "N/A", interface: "lo", vlan: null, ttl: null },
-    },
-  },
-];
+function eventLabel(eventType: string) {
+  return EVENT_LABELS[eventType] ?? eventType.replaceAll("_", " ");
+}
 
-const LIVE_POOL: Omit<LogEntry, "id" | "heure">[] = [
-  { service: "sshd.service",   utilisateur: "unknown",    action: "Échec Connexion",       dangerosite: "CRITIQUE",      ipSource: "198.51.100.14", details: { metadata: { tentatives: 3, port: 22 },                reseau: { mac_source: "CC:DD:EE:FF:00:11", interface: "eth0", vlan: 10, ttl: 55 } } },
-  { service: "systemd-logind", utilisateur: "aldoesp",    action: "Session Fermée",        dangerosite: "INFO",          ipSource: "Local",         details: { metadata: { session_id: "c13", duree: "0:42:11" },    reseau: { mac_source: "N/A", interface: "lo", vlan: null, ttl: null } } },
-  { service: "nginx",          utilisateur: "www-data",   action: "Requête 200",           dangerosite: "INFO",          ipSource: "10.0.0.25",     details: { metadata: { uri: "/api/status", status: 200 },        reseau: { mac_source: "11:22:33:44:55:66", interface: "eth1", vlan: 40, ttl: 64 } } },
-  { service: "sudo",           utilisateur: "deploy",     action: "systemctl restart",     dangerosite: "AVERTISSEMENT", ipSource: "Local",         details: { metadata: { commande: "systemctl restart app.service" }, reseau: { mac_source: "N/A", interface: "lo", vlan: null, ttl: null } } },
-  { service: "fail2ban",       utilisateur: "root",       action: "Scan Port Détecté",     dangerosite: "CRITIQUE",      ipSource: "203.0.113.77",  details: { metadata: { ports_scannes: 1024, duree_ms: 800 },     reseau: { mac_source: "DE:AD:00:00:BE:EF", interface: "eth0", vlan: 10, ttl: 47 }, erreur: { code: "PORT_SCAN", message: "Mass port scan detected from external host", type: "Reconnaissance" } } },
-  { service: "auditd",         utilisateur: "root",       action: "Accès Fichier Sensible",dangerosite: "CRITIQUE",      ipSource: "Local",         details: { metadata: { fichier: "/etc/shadow", op: "read", pid: 7810 }, erreur: { code: "SENSITIVE_READ", message: "Unauthorized read access to /etc/shadow", type: "PrivilegeEscalation" }, reseau: { mac_source: "N/A", interface: "lo", vlan: null, ttl: null } } },
-  { service: "cron",           utilisateur: "backup_usr", action: "Tâche Démarrée",        dangerosite: "INFO",          ipSource: "Local",         details: { metadata: { job: "/usr/local/bin/sync.sh", pid: 10091 }, reseau: { mac_source: "N/A", interface: "lo", vlan: null, ttl: null } } },
-];
+function severityForLog(log: AuditLog): Severity {
+  if (log.severity === "critical" || log.severity === "high") return "CRITIQUE";
+  if (log.severity === "medium") return "AVERTISSEMENT";
+  return "INFO";
+}
 
-let _idCtr = SEED.length + 1;
-function mkLiveLog(): LogEntry {
-  const t = LIVE_POOL[Math.floor(Math.random() * LIVE_POOL.length)];
-  const n = new Date();
-  return { ...t, id: _idCtr++, heure: `${String(n.getHours()).padStart(2,"0")}:${String(n.getMinutes()).padStart(2,"0")}:${String(n.getSeconds()).padStart(2,"0")}` };
+function formatTime(value: string) {
+  return new Date(value).toLocaleTimeString("fr-FR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function isAdminRole(role?: string | null) {
+  return role === "admin" || role === "super_admin";
+}
+
+function buildHourlyData(logs: AuditLog[]) {
+  const hours = Array.from({ length: 24 }, (_, hour) => ({
+    h: `${String(hour).padStart(2, "0")}h`,
+    i: 0,
+    a: 0,
+    c: 0,
+  }));
+
+  logs.forEach((log) => {
+    const hour = new Date(log.eventTimestamp).getHours();
+    const severity = severityForLog(log);
+    if (severity === "CRITIQUE") hours[hour].c += 1;
+    else if (severity === "AVERTISSEMENT") hours[hour].a += 1;
+    else hours[hour].i += 1;
+  });
+
+  return hours;
+}
+
+function buildSeverityData(logs: AuditLog[]) {
+  const counts: Record<Severity, number> = { INFO: 0, AVERTISSEMENT: 0, CRITIQUE: 0 };
+  logs.forEach((log) => {
+    counts[severityForLog(log)] += 1;
+  });
+
+  return [
+    { name: "Info", value: counts.INFO, color: C.info },
+    { name: "Avertissement", value: counts.AVERTISSEMENT, color: C.warn },
+    { name: "Critique", value: counts.CRITIQUE, color: C.crit },
+  ];
 }
 
 // ── JSON syntax highlighter ────────────────────────────────────────────────────
@@ -286,19 +246,31 @@ function Shell({
   active,
   onNav,
   onLogout,
+  canUseAdmin,
   children,
 }: {
   active: NavId;
   onNav: (id: NavId) => void;
   onLogout: () => void;
+  canUseAdmin: boolean;
   children: React.ReactNode;
 }) {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const currentUser = getCurrentUser();
+  const username = currentUser?.username ?? "Utilisateur";
+  const role = currentUser?.role ?? "auditor";
+  const initials = username
+    .split(/[.\s_-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "U";
   const date = new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  const navItems = NAV_ITEMS.filter((item) => item.id !== "administration" || canUseAdmin);
 
   const profileItems: { label: string; icon: React.ElementType; nav?: NavId }[] = [
     { label: "Mon Profil", icon: UserCog, nav: "profil" },
-    { label: "Journal de mes connexions", icon: History, nav: "sessions" },
+    { label: "Journal de mes actions", icon: History, nav: "sessions" },
     { label: "Sécurité & Clés SSH", icon: ShieldCheck, nav: "ssh" },
   ];
 
@@ -315,7 +287,7 @@ function Shell({
           <span className="ml-auto text-[9px] font-mono bg-blue-600/20 text-blue-400 px-1.5 py-0.5 rounded">SIEM</span>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-0.5">
-          {NAV_ITEMS.map(({ id, icon: Icon, label }) => {
+          {navItems.map(({ id, icon: Icon, label }) => {
             const on = active === id;
             return (
               <button key={id} onClick={() => onNav(id)}
@@ -331,9 +303,9 @@ function Shell({
           {profileMenuOpen && (
             <div className="absolute bottom-[76px] left-3 z-50 w-[260px] rounded-xl border border-zinc-700/70 bg-[#0c0c0e]/95 p-2 shadow-[0_24px_80px_rgba(0,0,0,0.72)] ring-1 ring-white/[0.06] backdrop-blur-xl transition duration-150">
               <div className="px-3 py-2.5">
-                <p className="text-sm font-bold leading-tight text-zinc-100">Aldo Esp</p>
+                <p className="text-sm font-bold leading-tight text-zinc-100">{username}</p>
                 <p className="mt-0.5 truncate text-[11px] font-mono text-zinc-500">
-                  ID: aldoesp (Administrateur)
+                  ID: {currentUser?.id ?? "inconnu"} ({role})
                 </p>
               </div>
 
@@ -382,10 +354,10 @@ function Shell({
             aria-expanded={profileMenuOpen}
             aria-haspopup="menu"
           >
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-xs font-bold text-white flex-shrink-0">AE</div>
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-xs font-bold text-white flex-shrink-0">{initials}</div>
             <div className="min-w-0">
-              <p className="truncate text-xs font-semibold text-zinc-100">aldoesp</p>
-              <p className="truncate text-[10px] text-zinc-500">Administrateur</p>
+              <p className="truncate text-xs font-semibold text-zinc-100">{username}</p>
+              <p className="truncate text-[10px] text-zinc-500">{role}</p>
             </div>
             <ChevronUp
               size={13}
@@ -428,7 +400,7 @@ function Shell({
           </div>
         </header>
         <nav className="flex flex-shrink-0 gap-2 overflow-x-auto border-b border-border bg-[#0d0d10] px-3 py-2 md:hidden">
-          {NAV_ITEMS.map(({ id, icon: Icon, label }) => {
+          {navItems.map(({ id, icon: Icon, label }) => {
             const on = active === id;
             return (
               <button
@@ -452,18 +424,41 @@ function Shell({
 
 // ── Dashboard view ─────────────────────────────────────────────────────────────
 
-function DashboardView({ logs, playing, setPlaying }: { logs: LogEntry[]; playing: boolean; setPlaying: (v: boolean | ((p: boolean) => boolean)) => void }) {
+function DashboardView({
+  logs,
+  loading,
+  error,
+  playing,
+  setPlaying,
+}: {
+  logs: AuditLog[];
+  loading: boolean;
+  error: string | null;
+  playing: boolean;
+  setPlaying: (v: boolean | ((p: boolean) => boolean)) => void;
+}) {
   const [expanded, setExpanded] = useState<number | null>(null);
-  const total = DONUT_DATA.reduce((s, d) => s + d.value, 0);
+  const areaData = useMemo(() => buildHourlyData(logs), [logs]);
+  const donutData = useMemo(() => buildSeverityData(logs), [logs]);
+  const total = donutData.reduce((s, d) => s + d.value, 0);
+  const criticalCount = logs.filter((log) => severityForLog(log) === "CRITIQUE").length;
+  const warningCount = logs.filter((log) => severityForLog(log) === "AVERTISSEMENT").length;
+  const activeSources = new Set(logs.map((log) => log.sourceName)).size;
 
   return (
     <main className="flex-1 overflow-y-auto px-6 py-5 space-y-4" style={{ scrollbarWidth: "none" } as React.CSSProperties}>
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard title="Total Logs (24h)"      value="142 508"      icon={BarChart2}     bg="bg-blue-600"  trend="up"   sub="Depuis minuit" />
-        <KpiCard title="Connexions Échouées"   value="1 240"        icon={XCircle}       bg="bg-amber-500" vc="text-amber-400"   trend="up"   sub="+18% vs. hier" />
-        <KpiCard title="Alertes Critiques"     value="14"           icon={AlertTriangle} bg="bg-red-600"   vc="text-red-400"     trend="down" sub="2 non résolues" />
-        <KpiCard title="Serveurs Distants"     value="3 / 4 Actifs" icon={Server}        bg="bg-zinc-600"  sub="srv-04 hors ligne" />
+        <KpiCard title="Logs chargés" value={String(total)} icon={BarChart2} bg="bg-blue-600" sub="Source PostgreSQL" />
+        <KpiCard title="Avertissements" value={String(warningCount)} icon={XCircle} bg="bg-amber-500" vc="text-amber-400" sub="Sévérité medium" />
+        <KpiCard title="Événements critiques" value={String(criticalCount)} icon={AlertTriangle} bg="bg-red-600" vc="text-red-400" sub="High ou critical" />
+        <KpiCard title="Sources actives" value={String(activeSources)} icon={Server} bg="bg-zinc-600" sub="Dans la page courante" />
       </section>
+
+      {error && (
+        <div className="rounded-lg border border-red-500/25 bg-red-500/10 px-4 py-3 text-xs font-mono text-red-300">
+          {error}
+        </div>
+      )}
 
       <section className="grid grid-cols-3 gap-4">
         <div className="col-span-2 bg-card border border-border rounded-lg p-5">
@@ -478,7 +473,7 @@ function DashboardView({ logs, playing, setPlaying }: { logs: LogEntry[]; playin
             </div>
           </div>
           <ResponsiveContainer width="100%" height={190}>
-            <AreaChart data={AREA_DATA} margin={{ top: 4, right: 4, left: -22, bottom: 0 }}>
+            <AreaChart data={areaData} margin={{ top: 4, right: 4, left: -22, bottom: 0 }}>
               <defs>
                 {([["gi", C.info], ["gw", C.warn], ["gc", C.crit]] as const).map(([id, col]) => (
                   <linearGradient key={id} id={id} x1="0" y1="0" x2="0" y2="1">
@@ -515,7 +510,7 @@ function DashboardView({ logs, playing, setPlaying }: { logs: LogEntry[]; playin
                   stroke="transparent"
                 />
                 <Pie
-                  data={DONUT_DATA}
+                  data={donutData}
                   cx="50%"
                   cy="50%"
                   innerRadius={52}
@@ -525,7 +520,7 @@ function DashboardView({ logs, playing, setPlaying }: { logs: LogEntry[]; playin
                   startAngle={90}
                   endAngle={-270}
                 >
-                  {DONUT_DATA.map((d) => (
+                  {donutData.map((d) => (
                     <Cell key={d.name} fill={d.color} stroke="#101216" strokeWidth={2} />
                   ))}
                 </Pie>
@@ -537,7 +532,7 @@ function DashboardView({ logs, playing, setPlaying }: { logs: LogEntry[]; playin
             </div>
           </div>
           <div className="mt-3 space-y-2.5">
-            {DONUT_DATA.map((d) => (
+            {donutData.map((d) => (
               <div key={d.name} className="flex items-center justify-between text-xs">
                 <span className="flex items-center gap-2 text-zinc-400">
                   <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />{d.name}
@@ -553,7 +548,7 @@ function DashboardView({ logs, playing, setPlaying }: { logs: LogEntry[]; playin
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
           <div className="flex items-center gap-2">
             <Activity size={14} className="text-blue-400" />
-            <h2 className="text-sm font-semibold">Historique des Actions (Temps Réel)</h2>
+            <h2 className="text-sm font-semibold">Historique système (Temps Réel)</h2>
             {playing && <><span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse ml-2" /><span className="text-[10px] font-mono text-red-400 font-semibold">LIVE</span></>}
           </div>
           <div className="flex items-center gap-2">
@@ -561,38 +556,53 @@ function DashboardView({ logs, playing, setPlaying }: { logs: LogEntry[]; playin
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${playing ? "bg-red-500/10 border-red-500/25 text-red-400 hover:bg-red-500/20" : "bg-emerald-500/10 border-emerald-500/25 text-emerald-400 hover:bg-emerald-500/20"}`}>
               {playing ? <Pause size={11} /> : <Play size={11} />}{playing ? "Pause" : "Reprendre"}
             </button>
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600/10 border border-blue-600/25 text-blue-400 hover:bg-blue-600/20 transition-all">
+            <button
+              onClick={() => void trackUserAction("REPORT_EXPORTED", "Dashboard audit", { source: "dashboard-summary" })}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600/10 border border-blue-600/25 text-blue-400 hover:bg-blue-600/20 transition-all"
+            >
               <Download size={11} />Exporter (CSV/PDF)
             </button>
           </div>
         </div>
         <div className="grid gap-2 px-5 py-2.5 border-b border-border bg-muted/40 text-[10px] font-semibold text-zinc-600 uppercase tracking-wider"
           style={{ gridTemplateColumns: "90px 155px 115px 1fr 145px 125px 32px" }}>
-          <span>Heure</span><span>Service</span><span>Utilisateur</span><span>Action</span><span>Dangerosité</span><span>IP Source</span><span />
+          <span>Heure</span><span>Type</span><span>Source</span><span>Message</span><span>Dangerosité</span><span>Origine</span><span />
         </div>
         <div className="overflow-y-auto max-h-64" style={{ scrollbarWidth: "none" } as React.CSSProperties}>
-          {logs.map((log, idx) => (
+          {loading ? (
+            <div className="flex h-40 flex-col items-center justify-center text-zinc-500">
+              <Loader2 size={24} className="mb-2 animate-spin opacity-60" />
+              <p className="text-xs font-mono">Chargement des logs PostgreSQL...</p>
+            </div>
+          ) : logs.length === 0 ? (
+            <div className="flex h-40 flex-col items-center justify-center text-zinc-500">
+              <Terminal size={28} className="mb-2 opacity-20" />
+              <p className="text-xs font-mono">Aucun log d'audit disponible</p>
+            </div>
+          ) : logs.map((log, idx) => {
+            const severity = severityForLog(log);
+            return (
             <div key={log.id}>
               <button onClick={() => setExpanded((p) => p === log.id ? null : log.id)}
                 className={`w-full grid gap-2 px-5 py-2.5 text-left text-xs border-b border-border/40 transition-colors group ${idx % 2 === 0 ? "bg-card" : "bg-muted/10"} hover:bg-blue-600/5`}
                 style={{ gridTemplateColumns: "90px 155px 115px 1fr 145px 125px 32px" }}>
-                <span className="font-mono text-zinc-500 tabular-nums text-[11px]">{log.heure}</span>
-                <span className="text-zinc-400 truncate font-mono text-[11px]">{log.service}</span>
-                <span className="text-zinc-300 flex items-center gap-1.5 truncate"><LogIn size={10} className="text-zinc-600 flex-shrink-0" />{log.utilisateur}</span>
-                <span className="text-zinc-200 truncate">{log.action}</span>
-                <span><Badge level={log.dangerosite} /></span>
-                <span className="font-mono text-zinc-500 text-[11px]">{log.ipSource}</span>
+                <span className="font-mono text-zinc-500 tabular-nums text-[11px]">{formatTime(log.eventTimestamp)}</span>
+                <span className="text-zinc-400 truncate font-mono text-[11px]">{log.eventType}</span>
+                <span className="text-zinc-300 flex items-center gap-1.5 truncate"><Server size={10} className="text-zinc-600 flex-shrink-0" />{log.sourceName}</span>
+                <span className="text-zinc-200 truncate">{log.message}</span>
+                <span><Badge level={severity} /></span>
+                <span className="font-mono text-zinc-500 text-[11px]">{log.sourceType}</span>
                 <span className="flex items-center justify-center">
                   <ChevronDown size={13} className={`text-zinc-500 group-hover:text-zinc-400 transition-transform duration-200 ${expanded === log.id ? "rotate-180 text-blue-400" : ""}`} />
                 </span>
               </button>
               <div className="overflow-hidden transition-all duration-300" style={{ maxHeight: expanded === log.id ? "200px" : "0px" }}>
                 <div className="px-5 py-3 bg-zinc-950/90 border-b border-border">
-                  <JsonBlock data={{ heure: log.heure, service: log.service, utilisateur: log.utilisateur, action: log.action, dangerosite: log.dangerosite, ip_source: log.ipSource, ...log.details }} />
+                  <JsonBlock data={{ ...log, eventLabel: eventLabel(log.eventType), uiSeverity: severity }} />
                 </div>
               </div>
             </div>
-          ))}
+          )})}
         </div>
         <div className="px-5 py-2 flex items-center justify-between border-t border-border bg-muted/20">
           <span className="text-xs font-mono text-zinc-500">{logs.length} entrée(s) affichée(s)</span>
@@ -605,25 +615,44 @@ function DashboardView({ logs, playing, setPlaying }: { logs: LogEntry[]; playin
 
 // ── Historique Live view ───────────────────────────────────────────────────────
 
-const ALL_SERVICES   = ["Tous les services", "sshd.service", "systemd-logind", "sudo", "nginx", "auditd", "cron", "kernel", "firewalld", "fail2ban", "postgresql"];
-const ALL_SEVERITIES = ["Toutes", "CRITIQUE", "AVERTISSEMENT", "INFO"] as const;
-const ALL_IPS        = ["Toutes les IPs", "192.168.1.50", "192.168.1.12", "10.0.0.25", "203.0.113.42", "203.0.113.77", "198.51.100.14", "Local"];
+const COL = "44px 120px 112px 150px 1fr 148px 120px 36px";
 
-const COL = "44px 92px 158px 112px 1fr 148px 120px 36px";
-
-function HistoriqueLiveView({ logs, playing, setPlaying, onClear }: {
-  logs: LogEntry[];
+function HistoriqueLiveView({
+  logs,
+  pagination,
+  query,
+  loading,
+  error,
+  playing,
+  setPlaying,
+  onQueryChange,
+  onClear,
+  onToggleJournalctlLive,
+  journalctlStatus,
+  journalctlBusy,
+}: {
+  logs: AuditLog[];
+  pagination: AuditLogPagination;
+  query: Required<Pick<AuditLogQuery, "page" | "limit">> & Omit<AuditLogQuery, "page" | "limit">;
+  loading: boolean;
+  error: string | null;
   playing: boolean;
   setPlaying: (v: boolean | ((p: boolean) => boolean)) => void;
+  onQueryChange: (query: AuditLogQuery) => void;
   onClear: () => void;
+  onToggleJournalctlLive: () => void;
+  journalctlStatus: JournalctlLiveStatus | null;
+  journalctlBusy: boolean;
 }) {
-  // Row 5 (nginx 403) pre-expanded — its JSON showcases metadata + erreur + reseau + mac
-  const [expanded, setExpanded] = useState<number | null>(5);
+  const [expanded, setExpanded] = useState<number | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [blink, setBlink]           = useState(true);
-  const [svcFilter, setSvcFilter]   = useState("Tous les services");
-  const [sevFilter, setSevFilter]   = useState<typeof ALL_SEVERITIES[number]>("Toutes");
-  const [ipFilter,  setIpFilter]    = useState("Toutes les IPs");
+  const [search, setSearch] = useState(query.search ?? "");
+  const [severity, setSeverity] = useState(query.severity ?? "");
+  const [eventType, setEventType] = useState(query.event_type ?? "");
+  const [sourceType, setSourceType] = useState(query.source_type ?? "");
+  const [dateFrom, setDateFrom] = useState(query.date_from ?? "");
+  const [dateTo, setDateTo] = useState(query.date_to ?? "");
   const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -637,18 +666,24 @@ function HistoriqueLiveView({ logs, playing, setPlaying, onClear }: {
     }
   }, [logs, autoScroll, playing]);
 
-  const filtered = useMemo(() => logs.filter((l) => {
-    if (svcFilter !== "Tous les services" && l.service    !== svcFilter)    return false;
-    if (sevFilter !== "Toutes"           && l.dangerosite !== sevFilter)    return false;
-    if (ipFilter  !== "Toutes les IPs"   && l.ipSource    !== ipFilter)     return false;
-    return true;
-  }), [logs, svcFilter, sevFilter, ipFilter]);
+  const critN = logs.filter((l) => severityForLog(l) === "CRITIQUE").length;
+  const warnN = logs.filter((l) => severityForLog(l) === "AVERTISSEMENT").length;
+  const infoN = logs.filter((l) => severityForLog(l) === "INFO").length;
+  const hasFilter = Boolean(query.search || query.severity || query.event_type || query.source_type || query.date_from || query.date_to);
 
-  const shown = filtered.slice(0, 50);
-  const critN = shown.filter((l) => l.dangerosite === "CRITIQUE").length;
-  const warnN = shown.filter((l) => l.dangerosite === "AVERTISSEMENT").length;
-  const infoN = shown.filter((l) => l.dangerosite === "INFO").length;
-  const hasFilter = svcFilter !== "Tous les services" || sevFilter !== "Toutes" || ipFilter !== "Toutes les IPs";
+  const applyFilters = () => {
+    onQueryChange({ search, severity, event_type: eventType, source_type: sourceType, date_from: dateFrom, date_to: dateTo, page: 1 });
+  };
+
+  const resetFilters = () => {
+    setSearch("");
+    setSeverity("");
+    setEventType("");
+    setSourceType("");
+    setDateFrom("");
+    setDateTo("");
+    onQueryChange({ search: "", severity: "", event_type: "", source_type: "", date_from: "", date_to: "", page: 1 });
+  };
 
   return (
     <main className="flex-1 flex flex-col overflow-hidden px-6 py-5 gap-3">
@@ -689,48 +724,74 @@ function HistoriqueLiveView({ logs, playing, setPlaying, onClear }: {
         </button>
 
         <div className="ml-auto flex items-center gap-2">
-          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600/10 border border-blue-600/25 text-blue-400 hover:bg-blue-600/20 transition-all">
-            <Download size={12} />Exporter le rapport (CSV/PDF)
+          <button
+            onClick={onToggleJournalctlLive}
+            disabled={journalctlBusy}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600/10 border border-emerald-600/25 text-emerald-400 hover:bg-emerald-600/20 disabled:opacity-50 transition-all"
+          >
+            {journalctlBusy ? <Loader2 size={12} className="animate-spin" /> : <RotateCw size={12} />}
+            {journalctlStatus?.running ? "Arrêter journalctl -f" : "Démarrer journalctl -f"}
+          </button>
+          <button
+            onClick={() => void trackUserAction("REPORT_EXPORTED", "Historique Live", { source: "live-feed" })}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600/10 border border-blue-600/25 text-blue-400 hover:bg-blue-600/20 transition-all"
+          >
+            <Download size={12} />Exporter le rapport
           </button>
         </div>
       </div>
 
       {/* ── Filter bar ── */}
-      <div className="flex items-center gap-3 px-4 py-2.5 bg-card border border-border rounded-lg flex-shrink-0">
+      <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 bg-card border border-border rounded-lg flex-shrink-0">
         <Filter size={13} className="text-zinc-600 flex-shrink-0" />
         <span className="text-[11px] text-zinc-500 font-medium whitespace-nowrap">Filtres :</span>
 
-        {/* Service */}
         <div className="relative min-w-0 flex-1 max-w-[220px]">
-          <select value={svcFilter} onChange={(e) => setSvcFilter(e.target.value)}
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            className="w-full bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-blue-600/50"
+            placeholder="Recherche texte" />
+        </div>
+
+        <div className="relative min-w-0 flex-1 max-w-[150px]">
+          <select value={severity} onChange={(e) => setSeverity(e.target.value)}
             className="w-full appearance-none bg-muted border border-border rounded-lg pl-3 pr-7 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-600/50 cursor-pointer">
-            {ALL_SERVICES.map((s) => <option key={s} value={s}>{s === "Tous les services" ? "Filtrer par Service" : s}</option>)}
+            <option value="">Toutes sévérités</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="critical">Critical</option>
           </select>
           <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
         </div>
 
-        {/* Sévérité */}
         <div className="relative min-w-0 flex-1 max-w-[180px]">
-          <select value={sevFilter} onChange={(e) => setSevFilter(e.target.value as typeof ALL_SEVERITIES[number])}
+          <select value={eventType} onChange={(e) => setEventType(e.target.value)}
             className="w-full appearance-none bg-muted border border-border rounded-lg pl-3 pr-7 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-600/50 cursor-pointer">
-            {ALL_SEVERITIES.map((s) => <option key={s} value={s}>{s === "Toutes" ? "Sévérité : Toutes" : s}</option>)}
+            <option value="">Tous les types</option>
+            {EVENT_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
           <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
         </div>
 
-        {/* IP */}
-        <div className="relative min-w-0 flex-1 max-w-[200px]">
-          <select value={ipFilter} onChange={(e) => setIpFilter(e.target.value)}
-            className="w-full appearance-none bg-muted border border-border rounded-lg pl-3 pr-7 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-600/50 cursor-pointer">
-            {ALL_IPS.map((ip) => <option key={ip} value={ip}>{ip === "Toutes les IPs" ? "Adresse IP : Toutes" : ip}</option>)}
-          </select>
-          <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
-        </div>
+        <input value={sourceType} onChange={(e) => setSourceType(e.target.value)}
+          className="w-32 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-blue-600/50"
+          placeholder="Source type" />
+
+        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+          className="bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-600/50 [color-scheme:dark]" />
+
+        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+          className="bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-600/50 [color-scheme:dark]" />
+
+        <button onClick={applyFilters}
+          className="rounded-lg border border-blue-600/25 bg-blue-600/10 px-3 py-1.5 text-xs font-medium text-blue-400 hover:bg-blue-600/20">
+          Appliquer
+        </button>
 
         {hasFilter && (
-          <button onClick={() => { setSvcFilter("Tous les services"); setSevFilter("Toutes"); setIpFilter("Toutes les IPs"); }}
+          <button onClick={resetFilters}
             className="text-xs font-mono text-zinc-500 hover:text-zinc-400 transition-colors whitespace-nowrap">
-            ✕ Réinitialiser
+            Réinitialiser
           </button>
         )}
 
@@ -750,11 +811,11 @@ function HistoriqueLiveView({ logs, playing, setPlaying, onClear }: {
           style={{ gridTemplateColumns: COL }}>
           <span className="flex items-center gap-1"><Hash size={9} />ID</span>
           <span>Heure</span>
-          <span>Service</span>
-          <span>Utilisateur</span>
-          <span>Action</span>
+          <span>Sévérité</span>
+          <span>Source</span>
+          <span>Message</span>
           <span>Dangerosité</span>
-          <span className="flex items-center gap-1"><Wifi size={9} />IP Source</span>
+          <span className="flex items-center gap-1"><Wifi size={9} />Type source</span>
           <span />
         </div>
 
@@ -762,14 +823,25 @@ function HistoriqueLiveView({ logs, playing, setPlaying, onClear }: {
         <div ref={bodyRef} className="overflow-y-auto flex-1 min-h-0" style={{ scrollbarWidth: "none" } as React.CSSProperties}
           onScroll={(e) => setAutoScroll(e.currentTarget.scrollTop < 50)}>
 
-          {shown.length === 0 ? (
+          {loading ? (
+            <div className="flex flex-col items-center justify-center h-40 text-zinc-500">
+              <Loader2 size={28} className="mb-2 animate-spin opacity-50" />
+              <p className="text-xs font-mono">Chargement des logs PostgreSQL</p>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center h-40 text-red-400">
+              <AlertTriangle size={28} className="mb-2 opacity-50" />
+              <p className="text-xs font-mono">{error}</p>
+            </div>
+          ) : logs.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-zinc-500">
               <Terminal size={28} className="mb-2 opacity-20" />
               <p className="text-xs font-mono">Aucun événement correspondant aux filtres</p>
             </div>
-          ) : shown.map((log, idx) => {
+          ) : logs.map((log, idx) => {
             const isOpen = expanded === log.id;
             const isNew  = idx === 0 && playing;
+            const severity = severityForLog(log);
             return (
               <div key={log.id} className={isOpen ? "border-l-2 border-blue-500/50" : "border-l-2 border-transparent"}>
 
@@ -784,14 +856,14 @@ function HistoriqueLiveView({ logs, playing, setPlaying, onClear }: {
                   {isNew && <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-emerald-400/70 animate-pulse" />}
 
                   <span className="font-mono text-[10px] text-zinc-500 tabular-nums self-center">#{log.id}</span>
-                  <span className="font-mono text-[11px] text-zinc-500 tabular-nums self-center">{log.heure}</span>
-                  <span className="font-mono text-[11px] text-zinc-400 truncate self-center">{log.service}</span>
+                  <span className="font-mono text-[11px] text-zinc-500 tabular-nums self-center">{formatTime(log.eventTimestamp)}</span>
+                  <span className="font-mono text-[11px] text-zinc-400 truncate self-center">{log.severity}</span>
                   <span className="text-[11px] text-zinc-300 flex items-center gap-1 truncate self-center">
-                    <LogIn size={9} className="text-zinc-500 flex-shrink-0" />{log.utilisateur}
+                    <Server size={9} className="text-zinc-500 flex-shrink-0" />{log.sourceName}
                   </span>
-                  <span className={`text-[11px] font-medium truncate self-center ${SEV[log.dangerosite].text}`}>{log.action}</span>
-                  <span className="self-center"><Badge level={log.dangerosite} /></span>
-                  <span className="font-mono text-[11px] text-zinc-500 self-center">{log.ipSource}</span>
+                  <span className={`text-[11px] font-medium truncate self-center ${SEV[severity].text}`}>{log.message}</span>
+                  <span className="self-center"><Badge level={severity} /></span>
+                  <span className="font-mono text-[11px] text-zinc-500 self-center">{log.sourceType}</span>
                   <span className="flex items-center justify-center self-center">
                     <ChevronDown size={13} className={`text-zinc-500 group-hover:text-zinc-400 transition-transform duration-200 ${isOpen ? "rotate-180 text-blue-400" : ""}`} />
                   </span>
@@ -804,13 +876,13 @@ function HistoriqueLiveView({ logs, playing, setPlaying, onClear }: {
 
                     {/* Accordion header */}
                     <div className="flex items-center gap-3 mb-4">
-                      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${SEV[log.dangerosite].dot}`} />
+                      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${SEV[severity].dot}`} />
                       <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">
-                        Détail de l'événement #{log.id} — {log.service}
+                        Détail de l'événement #{log.id} — {log.eventType}
                       </span>
                       <div className="flex-1 h-px bg-zinc-800" />
-                      <Badge level={log.dangerosite} />
-                      <span className="text-[10px] font-mono text-zinc-500">{log.heure}</span>
+                      <Badge level={severity} />
+                      <span className="text-[10px] font-mono text-zinc-500">{formatTime(log.eventTimestamp)}</span>
                     </div>
 
                     {/* Two-column: summary pills + JSON */}
@@ -819,24 +891,17 @@ function HistoriqueLiveView({ logs, playing, setPlaying, onClear }: {
                       {/* Left: field summary */}
                       <div className="w-44 flex-shrink-0 space-y-3">
                         {([
-                          ["Service",     log.service],
-                          ["Utilisateur", log.utilisateur],
-                          ["IP Source",   log.ipSource],
-                          ["Sévérité",    log.dangerosite],
-                          ["Action",      log.action],
+                          ["Type",        eventLabel(log.eventType)],
+                          ["Source",      log.sourceName],
+                          ["Origine",     log.sourceType],
+                          ["Sévérité",    severity],
+                          ["Reçue",       formatTime(log.receivedAt)],
                         ] as [string, string][]).map(([k, v]) => (
                           <div key={k}>
                             <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-0.5">{k}</p>
-                            <p className={`text-[11px] font-mono truncate ${k === "Sévérité" ? SEV[log.dangerosite].text : "text-zinc-300"}`}>{v}</p>
+                            <p className={`text-[11px] font-mono truncate ${k === "Sévérité" ? SEV[severity].text : "text-zinc-300"}`}>{String(v)}</p>
                           </div>
                         ))}
-                        {/* MAC address pull-out */}
-                        {log.details.reseau && (log.details.reseau as Record<string,unknown>).mac_source && (
-                          <div>
-                            <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-0.5">MAC Source</p>
-                            <p className="text-[11px] font-mono text-violet-400">{String((log.details.reseau as Record<string,unknown>).mac_source)}</p>
-                          </div>
-                        )}
                       </div>
 
                       {/* Right: JSON */}
@@ -851,15 +916,17 @@ function HistoriqueLiveView({ logs, playing, setPlaying, onClear }: {
                         </div>
                         <JsonBlock data={{
                           id:          log.id,
-                          timestamp:   log.heure,
-                          service:     log.service,
-                          utilisateur: log.utilisateur,
-                          action:      log.action,
-                          dangerosite: log.dangerosite,
-                          ip_source:   log.ipSource,
-                          metadata:    log.details.metadata ?? {},
-                          erreur:      log.details.erreur   ?? null,
-                          reseau:      log.details.reseau   ?? {},
+                          timestamp:   log.eventTimestamp,
+                          source_name: log.sourceName,
+                          source_type: log.sourceType,
+                          event_type:  log.eventType,
+                          libelle:     eventLabel(log.eventType),
+                          severity:    log.severity,
+                          dangerosite: severity,
+                          message:     log.message,
+                          received_at: log.receivedAt,
+                          raw_payload: log.rawPayload,
+                          normalized_payload: log.normalizedPayload,
                         }} />
                       </div>
                     </div>
@@ -873,7 +940,7 @@ function HistoriqueLiveView({ logs, playing, setPlaying, onClear }: {
         {/* ── Micro status line ── */}
         <div className="flex items-center gap-4 px-4 py-2 border-t border-border bg-[#0d0d10] flex-shrink-0">
           <span className="text-[10px] font-mono text-zinc-600">
-            Affichage de <span className="text-zinc-400 font-semibold">{Math.min(shown.length, 50)}</span> derniers événements
+            Page <span className="text-zinc-400 font-semibold">{pagination.page}</span> / {pagination.totalPages} · {pagination.total} événement(s)
           </span>
           <span className="text-zinc-800 text-[10px]">—</span>
           <span className={`flex items-center gap-1.5 text-[10px] font-mono transition-colors ${autoScroll && playing ? "text-emerald-500/80" : "text-zinc-600"}`}>
@@ -886,9 +953,29 @@ function HistoriqueLiveView({ logs, playing, setPlaying, onClear }: {
               <span className="text-[10px] font-mono text-amber-500/70">Filtres appliqués</span>
             </>
           )}
+          <span className="text-zinc-800 text-[10px]">—</span>
+          <span className={`text-[10px] font-mono ${journalctlStatus?.running ? "text-emerald-500/80" : "text-zinc-600"}`}>
+            journalctl -f {journalctlStatus?.running ? "actif" : "arrêté"}
+          </span>
           <span className="ml-auto text-[10px] font-mono text-zinc-500">
             Màj: <span className="text-zinc-500">{new Date().toLocaleTimeString("fr-FR")}</span>
           </span>
+          <button
+            type="button"
+            disabled={pagination.page <= 1 || loading}
+            onClick={() => onQueryChange({ page: Math.max(1, pagination.page - 1) })}
+            className="rounded border border-zinc-800 px-2 py-1 text-[10px] text-zinc-500 disabled:opacity-40"
+          >
+            Précédent
+          </button>
+          <button
+            type="button"
+            disabled={pagination.page >= pagination.totalPages || loading}
+            onClick={() => onQueryChange({ page: pagination.page + 1 })}
+            className="rounded border border-zinc-800 px-2 py-1 text-[10px] text-zinc-500 disabled:opacity-40"
+          >
+            Suivant
+          </button>
         </div>
       </div>
     </main>
@@ -912,16 +999,6 @@ interface Report {
   services: string[];
   severites: string[];
 }
-
-const ARCHIVED_REPORTS: Report[] = [
-  { id: 1, nom: "audit_sshd_juin2026",       format: "PDF",  debut: "01/06/2026", fin: "12/06/2026", taille: "2.4 Mo",  statut: "Prêt",     genere: "12/06/2026 à 18:42", services: ["sshd.service"], severites: ["CRITIQUE", "AVERTISSEMENT"] },
-  { id: 2, nom: "rapport_critique_systeme",  format: "CSV",  debut: "11/06/2026", fin: "11/06/2026", taille: "450 Ko", statut: "Prêt",     genere: "11/06/2026 à 23:07", services: ["auditd", "sudo", "kernel"], severites: ["CRITIQUE"] },
-  { id: 3, nom: "analyse_nginx_acces",       format: "JSON", debut: "05/06/2026", fin: "10/06/2026", taille: "1.1 Mo", statut: "Prêt",     genere: "10/06/2026 à 09:15", services: ["nginx"], severites: ["AVERTISSEMENT", "INFO"] },
-  { id: 4, nom: "rapport_hebdo_complet",     format: "PDF",  debut: "03/06/2026", fin: "09/06/2026", taille: "5.8 Mo", statut: "Prêt",     genere: "09/06/2026 à 06:00", services: ["Tous"], severites: ["CRITIQUE", "AVERTISSEMENT", "INFO"] },
-  { id: 5, nom: "export_postgresql_erreurs", format: "CSV",  debut: "07/06/2026", fin: "07/06/2026", taille: "88 Ko",  statut: "Échec",    genere: "07/06/2026 à 14:33", services: ["postgresql"], severites: ["CRITIQUE"] },
-  { id: 6, nom: "synthese_firewalld_mai",    format: "PDF",  debut: "20/05/2026", fin: "31/05/2026", taille: "3.2 Mo", statut: "Prêt",     genere: "31/05/2026 à 22:00", services: ["firewalld"], severites: ["CRITIQUE", "AVERTISSEMENT"] },
-  { id: 7, nom: "rapport_temps_reel_live",   format: "JSON", debut: "13/06/2026", fin: "13/06/2026", taille: "—",      statut: "En cours", genere: "13/06/2026 à 20:01", services: ["Tous"], severites: ["CRITIQUE", "AVERTISSEMENT", "INFO"] },
-];
 
 const FORMAT_ICON_COLOR: Record<ReportFormat, { icon: string; bg: string; text: string }> = {
   PDF:  { icon: "PDF",  bg: "bg-red-500/10  border-red-500/20",  text: "text-red-400"   },
@@ -973,7 +1050,7 @@ function RapportsView() {
   const [reportName,  setReportName]  = useState("rapport_audit_");
   const [generating,  setGenerating]  = useState(false);
   const [generated,   setGenerated]   = useState(false);
-  const [reports,     setReports]     = useState<Report[]>(ARCHIVED_REPORTS);
+  const [reports,     setReports]     = useState<Report[]>([]);
   const [sortField,   setSortField]   = useState<keyof Report>("id");
   const [sortAsc,     setSortAsc]     = useState(false);
   const [filterStatus, setFilterStatus] = useState<ReportStatus | "Tous">("Tous");
@@ -997,6 +1074,18 @@ function RapportsView() {
         severites: sevs,
       };
       setReports((p) => [newReport, ...p]);
+      void trackUserAction("GENERATE_REPORT", newReport.nom, {
+        format: newReport.format,
+        service: selService,
+        severites: newReport.severites,
+        periode: { debut: dateDebut, fin: dateFin },
+      });
+      const format = selFormat.toLowerCase() as "json" | "csv" | "pdf";
+      window.open(getExportUrl(format, {
+        startDate: dateDebut,
+        endDate: dateFin,
+        action: reportName,
+      }), "_blank", "noopener,noreferrer");
       setGenerating(false);
       setGenerated(true);
       setTimeout(() => setGenerated(false), 4000);
@@ -1182,7 +1271,7 @@ function RapportsView() {
                 ].map(([k, v]) => (
                   <div key={k} className="flex items-start justify-between gap-2">
                     <span className="text-[10px] text-zinc-500 font-mono">{k}</span>
-                    <span className="text-[10px] text-zinc-400 font-mono text-right truncate max-w-[60%]">{v}</span>
+                    <span className="text-[10px] text-zinc-400 font-mono text-right truncate max-w-[60%]">{String(v)}</span>
                   </div>
                 ))}
               </div>
@@ -1319,6 +1408,7 @@ function RapportsView() {
                     {r.statut === "Prêt" && (
                       <button
                         title="Télécharger"
+                        onClick={() => void trackUserAction("REPORT_DOWNLOADED", `${r.nom}.${r.format.toLowerCase()}`, { reportId: r.id, format: r.format })}
                         className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-indigo-600/10 border border-indigo-600/25 text-indigo-400 hover:bg-indigo-600/20 transition-all"
                       >
                         <Download size={12} />
@@ -1404,12 +1494,68 @@ function ProfileReadOnlyField({
 }
 
 function ProfilView() {
-  const [saved, setSaved] = useState(false);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profileForm, setProfileForm] = useState({ firstName: "", lastName: "", email: "" });
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const handlePasswordSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  useEffect(() => {
+    const timer = window.setTimeout(async () => {
+      try {
+        const data = await getProfile();
+        setProfile(data);
+        setProfileForm({
+          firstName: data.firstName ?? "",
+          lastName: data.lastName ?? "",
+          email: data.email ?? "",
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Impossible de charger le profil");
+      } finally {
+        setLoading(false);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const handleProfileSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 2800);
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const updated = await updateProfile(profileForm);
+      setProfile(updated);
+      setMessage("Profil mis à jour");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Impossible de sauvegarder le profil");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handlePasswordSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError(null);
+    setMessage(null);
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setError("Les mots de passe ne correspondent pas");
+      return;
+    }
+
+    try {
+      await updatePassword(passwordForm.currentPassword, passwordForm.newPassword);
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setMessage("Mot de passe modifié");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Impossible de modifier le mot de passe");
+    }
   };
 
   return (
@@ -1425,11 +1571,27 @@ function ProfilView() {
           <div>
             <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Mon Profil</h2>
             <p className="mt-0.5 text-xs font-mono text-zinc-500">
-              Identité administrateur et sécurité du compte
+              Identité, rôle et sécurité du compte
             </p>
           </div>
         </div>
       </div>
+
+      {loading && (
+        <div className="rounded-lg border border-border bg-card px-4 py-3 text-xs font-mono text-zinc-500">
+          Chargement du profil...
+        </div>
+      )}
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-500/25 bg-red-500/10 px-4 py-3 text-xs font-mono text-red-300">
+          {error}
+        </div>
+      )}
+      {message && (
+        <div className="mb-4 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-xs font-mono text-emerald-300">
+          {message}
+        </div>
+      )}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,0.92fr)_minmax(360px,0.68fr)]">
         <section className="rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
@@ -1438,22 +1600,49 @@ function ProfilView() {
             <h3 className="text-sm font-semibold">Informations Générales</h3>
           </div>
 
-          <div className="space-y-5 px-5 py-5">
+          <form onSubmit={handleProfileSubmit} className="space-y-5 px-5 py-5">
             <div className="grid gap-4 md:grid-cols-3">
-              <ProfileReadOnlyField label="Username" value="aldoesp" icon={UserCog} />
-              <ProfileReadOnlyField label="ID" value="aldoesp" icon={KeyRound} />
-              <ProfileReadOnlyField label="Rôle actuel" value="Administrateur" icon={ShieldCheck} />
+              <ProfileReadOnlyField label="Username" value={profile?.username ?? "-"} icon={UserCog} />
+              <ProfileReadOnlyField label="ID" value={String(profile?.id ?? "-")} icon={KeyRound} />
+              <ProfileReadOnlyField label="Rôle actuel" value={profile?.role ?? "-"} icon={ShieldCheck} />
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              {([
+                ["Prénom", "firstName"],
+                ["Nom", "lastName"],
+                ["Email", "email"],
+              ] as const).map(([label, key]) => (
+                <label key={key} className="block">
+                  <span className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-zinc-500">{label}</span>
+                  <input
+                    type={key === "email" ? "email" : "text"}
+                    value={profileForm[key]}
+                    onChange={(event) => setProfileForm((current) => ({ ...current, [key]: event.target.value }))}
+                    className="w-full rounded-lg border border-border bg-muted px-3 py-3 text-xs text-zinc-200 outline-none transition focus:border-blue-500/45 focus:ring-1 focus:ring-blue-500/25"
+                  />
+                </label>
+              ))}
             </div>
 
             <div className="rounded-lg border border-blue-600/20 bg-blue-600/5 px-4 py-3">
               <div className="flex items-center gap-2.5">
                 <CalendarDays size={14} className="text-blue-400" />
                 <p className="text-xs font-medium text-zinc-300">
-                  Membre depuis le 22 Juin 2026
+                  Membre depuis {profile?.createdAt ? new Date(profile.createdAt).toLocaleDateString("fr-FR") : "-"} · Dernière connexion {profile?.lastLoginAt ? new Date(profile.lastLoginAt).toLocaleString("fr-FR") : "jamais"}
                 </p>
               </div>
             </div>
-          </div>
+
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-sm font-semibold text-blue-300 transition hover:bg-blue-500/20 disabled:opacity-60"
+            >
+              {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+              Enregistrer le profil
+            </button>
+          </form>
         </section>
 
         <section className="rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
@@ -1464,10 +1653,10 @@ function ProfilView() {
 
           <form onSubmit={handlePasswordSubmit} className="space-y-4 px-5 py-5">
             {[
-              ["Mot de passe actuel", "current-password"],
-              ["Nouveau mot de passe", "new-password"],
-              ["Confirmer le nouveau mot de passe", "new-password"],
-            ].map(([label, autoComplete]) => (
+              ["Mot de passe actuel", "currentPassword", "current-password"],
+              ["Nouveau mot de passe", "newPassword", "new-password"],
+              ["Confirmer le nouveau mot de passe", "confirmPassword", "new-password"],
+            ].map(([label, key, autoComplete]) => (
               <label key={label} className="block">
                 <span className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
                   {label}
@@ -1476,6 +1665,8 @@ function ProfilView() {
                   <KeyRound size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
                   <input
                     type="password"
+                    value={passwordForm[key as keyof typeof passwordForm]}
+                    onChange={(event) => setPasswordForm((current) => ({ ...current, [key]: event.target.value }))}
                     autoComplete={autoComplete}
                     className="w-full rounded-lg border border-border bg-muted px-3 py-3 pl-10 text-xs text-zinc-200 outline-none transition placeholder:text-zinc-500 focus:border-amber-500/45 focus:ring-1 focus:ring-amber-500/25"
                     placeholder="••••••••••••"
@@ -1492,11 +1683,6 @@ function ProfilView() {
               Enregistrer les modifications
             </button>
 
-            {saved && (
-              <p className="text-center text-[11px] font-mono text-emerald-400">
-                Modifications prêtes à être synchronisées.
-              </p>
-            )}
           </form>
         </section>
       </div>
@@ -1504,75 +1690,59 @@ function ProfilView() {
   );
 }
 
-// ── Sessions utilisateur view ─────────────────────────────────────────────────
+// ── Journal utilisateur view ─────────────────────────────────────────────────
 
-type SessionStatus = "Succès" | "Échec";
-
-const USER_SESSION_LOGS: {
-  id: number;
-  datetime: string;
-  ip: string;
-  status: SessionStatus;
-  userAgent: string;
-}[] = [
-  {
-    id: 1,
-    datetime: "22/06/2026 11:28:42",
-    ip: "192.168.1.24",
-    status: "Succès",
-    userAgent: "Firefox 127 · Kali Linux",
-  },
-  {
-    id: 2,
-    datetime: "22/06/2026 08:14:09",
-    ip: "192.168.1.24",
-    status: "Succès",
-    userAgent: "Firefox 127 · Kali Linux",
-  },
-  {
-    id: 3,
-    datetime: "21/06/2026 23:51:33",
-    ip: "203.0.113.42",
-    status: "Échec",
-    userAgent: "Chrome 124 · Windows 10",
-  },
-  {
-    id: 4,
-    datetime: "21/06/2026 19:06:18",
-    ip: "10.8.0.14",
-    status: "Succès",
-    userAgent: "Firefox 126 · Ubuntu 24.04",
-  },
-  {
-    id: 5,
-    datetime: "20/06/2026 07:42:55",
-    ip: "198.51.100.14",
-    status: "Échec",
-    userAgent: "curl/8.5.0 · Inconnu",
-  },
-  {
-    id: 6,
-    datetime: "19/06/2026 16:20:11",
-    ip: "172.23.0.1",
-    status: "Succès",
-    userAgent: "Chromium 126 · Linux",
-  },
-];
-
-const SESSION_STATUS_STYLE: Record<SessionStatus, { label: string; badge: string; dot: string }> = {
-  Succès: {
-    label: "Connexion réussie",
+const ACTION_STYLE: Record<string, { badge: string; dot: string }> = {
+  SUCCESS: {
     badge: "border-emerald-500/25 bg-emerald-500/10 text-emerald-400",
     dot: "bg-emerald-400",
   },
-  Échec: {
-    label: "Échec d'authentification",
+  FAILED: {
     badge: "border-red-500/25 bg-red-500/10 text-red-400",
     dot: "bg-red-500",
   },
 };
 
+function formatActionDate(value: string) {
+  return new Date(value).toLocaleString("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
 function SessionsView() {
+  const [actions, setActions] = useState<UserActionLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const currentUser = getCurrentUser();
+
+  const loadActions = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const rows = await getMyUserActions(100);
+      setActions(rows);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Impossible de charger le journal");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void trackUserAction("VIEW_ACTION_JOURNAL", "Journal d'actions");
+    const timer = window.setTimeout(() => {
+      void loadActions();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [loadActions]);
+
   return (
     <main
       className="flex-1 overflow-y-auto px-4 py-5 md:px-6"
@@ -1584,19 +1754,20 @@ function SessionsView() {
             <History size={15} className="text-blue-400" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Journal de mes connexions</h2>
+            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Journal de mes actions</h2>
             <p className="mt-0.5 text-xs font-mono text-zinc-500">
-              Audit des sessions utilisateur pour aldoesp
+              Audit applicatif du compte {currentUser?.username ?? "connecté"}
             </p>
           </div>
         </div>
 
         <button
           type="button"
+          onClick={() => void loadActions()}
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-600/25 bg-blue-600/10 px-3 py-2 text-xs font-semibold text-blue-400 transition hover:bg-blue-600/20"
         >
-          <Download size={14} />
-          Exporter les logs de session
+          <RotateCw size={14} className={loading ? "animate-spin" : ""} />
+          Rafraîchir
         </button>
       </div>
 
@@ -1604,63 +1775,302 @@ function SessionsView() {
         <div className="flex items-center justify-between border-b border-border bg-[#0d0d10] px-5 py-3.5">
           <div className="flex items-center gap-2.5">
             <ShieldCheck size={15} className="text-blue-400" />
-            <h3 className="text-sm font-semibold">Historique des dernières connexions</h3>
+            <h3 className="text-sm font-semibold">Historique des actions utilisateur</h3>
           </div>
           <span className="rounded-full bg-zinc-800/70 px-2.5 py-1 text-[10px] font-mono font-semibold text-zinc-500">
-            {USER_SESSION_LOGS.length} entrées
+            {actions.length} entrée{actions.length > 1 ? "s" : ""}
           </span>
         </div>
 
-        <div className="hidden grid-cols-[170px_150px_210px_1fr] gap-4 border-b border-border bg-muted/30 px-5 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-600 md:grid">
+        <div className="hidden grid-cols-[175px_190px_1fr_150px_1fr] gap-4 border-b border-border bg-muted/30 px-5 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-600 md:grid">
           <span>Date & Heure</span>
+          <span>Action</span>
+          <span>Ressource</span>
           <span>Adresse IP Source</span>
-          <span>Statut</span>
           <span>Navigateur/OS détecté</span>
         </div>
 
         <div className="divide-y divide-border/40">
-          {USER_SESSION_LOGS.map((session) => {
-            const style = SESSION_STATUS_STYLE[session.status];
-            return (
-              <div
-                key={session.id}
-                className="grid gap-3 px-5 py-4 text-xs transition hover:bg-blue-500/[0.06] hover:shadow-[inset_2px_0_0_rgba(59,130,246,0.45)] md:grid-cols-[170px_150px_210px_1fr] md:items-center md:gap-4"
-              >
-                <div>
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 md:hidden">
-                    Date & Heure
-                  </p>
-                  <p className="font-mono text-zinc-300">{session.datetime}</p>
-                </div>
+          {loading ? (
+            <div className="flex h-40 flex-col items-center justify-center text-zinc-500">
+              <Loader2 size={24} className="mb-2 animate-spin opacity-60" />
+              <p className="text-xs font-mono">Chargement du journal...</p>
+            </div>
+          ) : error ? (
+            <div className="flex h-40 flex-col items-center justify-center text-red-400">
+              <AlertTriangle size={24} className="mb-2 opacity-60" />
+              <p className="text-xs font-mono">{error}</p>
+            </div>
+          ) : actions.length === 0 ? (
+            <div className="flex h-40 flex-col items-center justify-center text-zinc-500">
+              <History size={28} className="mb-2 opacity-20" />
+              <p className="text-xs font-mono">Aucune action enregistrée pour ce compte</p>
+            </div>
+          ) : (
+            actions.map((action) => {
+              const style = ACTION_STYLE[action.status] ?? ACTION_STYLE.SUCCESS;
+              const label = USER_ACTION_LABELS[action.action_type] ?? action.action_type;
 
-                <div>
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 md:hidden">
-                    Adresse IP Source
-                  </p>
-                  <p className="font-mono text-zinc-400">{session.ip}</p>
-                </div>
+              return (
+                <div
+                  key={action.id}
+                  className="grid gap-3 px-5 py-4 text-xs transition hover:bg-blue-500/[0.06] hover:shadow-[inset_2px_0_0_rgba(59,130,246,0.45)] md:grid-cols-[175px_190px_1fr_150px_1fr] md:items-center md:gap-4"
+                >
+                  <div>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 md:hidden">
+                      Date & Heure
+                    </p>
+                    <p className="font-mono text-zinc-300">{formatActionDate(action.created_at)}</p>
+                  </div>
 
-                <div>
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 md:hidden">
-                    Statut
-                  </p>
-                  <span className={`inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-[10px] font-mono font-semibold ${style.badge}`}>
-                    <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
-                    {style.label}
-                  </span>
-                </div>
+                  <div>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 md:hidden">
+                      Action
+                    </p>
+                    <span className={`inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-[10px] font-mono font-semibold ${style.badge}`}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
+                      {label}
+                    </span>
+                  </div>
 
-                <div className="min-w-0">
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 md:hidden">
-                    Navigateur/OS détecté
-                  </p>
-                  <p className="truncate font-mono text-zinc-500">{session.userAgent}</p>
+                  <div className="min-w-0">
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 md:hidden">
+                      Ressource
+                    </p>
+                    <p className="truncate font-mono text-zinc-400">{action.resource ?? "Application"}</p>
+                  </div>
+
+                  <div>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 md:hidden">
+                      Adresse IP Source
+                    </p>
+                    <p className="font-mono text-zinc-400">{action.ip_source ?? "IP inconnue"}</p>
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 md:hidden">
+                      Navigateur/OS détecté
+                    </p>
+                    <p className="truncate font-mono text-zinc-500">{action.user_agent ?? "Agent inconnu"}</p>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
       </section>
+    </main>
+  );
+}
+
+// ── Administration view ──────────────────────────────────────────────────────
+
+const ROLE_OPTIONS = ["user", "auditor", "admin", "super_admin"] as const;
+
+function AdministrationView() {
+  const currentUser = getCurrentUser();
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, totalPages: 1 });
+  const [search, setSearch] = useState("");
+  const [role, setRole] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadUsers = useCallback(async (page = pagination.page) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const result = await getUsers({ page, limit: pagination.limit, search, role });
+      setUsers(result.data);
+      setPagination(result.pagination);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Impossible de charger les utilisateurs");
+    } finally {
+      setLoading(false);
+    }
+  }, [pagination.limit, pagination.page, search, role]);
+
+  useEffect(() => {
+    void trackUserAction("ADMIN_SECTION_VIEWED", "Administration");
+    const timer = window.setTimeout(() => {
+      void loadUsers(1);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [loadUsers]);
+
+  const handleRoleChange = async (user: UserProfile, nextRole: string) => {
+    try {
+      await updateUser(user.id, { role: nextRole });
+      await trackUserAction("ROLE_UPDATED", `Utilisateur #${user.id}`, { role: nextRole });
+      void loadUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Impossible de modifier le rôle");
+    }
+  };
+
+  const handleDeactivate = async (user: UserProfile) => {
+    try {
+      await deleteUser(user.id);
+      void loadUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Impossible de désactiver l'utilisateur");
+    }
+  };
+
+  const exportUrl = (format: "json" | "csv" | "pdf") => getExportUrl(format);
+
+  if (!isAdminRole(currentUser?.role)) {
+    return (
+      <main className="flex-1 flex flex-col items-center justify-center text-zinc-500">
+        <ShieldCheck size={36} className="mb-3 opacity-30" />
+        <p className="text-sm font-mono">Accès réservé aux administrateurs</p>
+      </main>
+    );
+  }
+
+  return (
+    <main className="flex-1 overflow-y-auto px-4 py-5 md:px-6" style={{ scrollbarWidth: "none" } as React.CSSProperties}>
+      <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-blue-600/30 bg-blue-600/20">
+            <UserCog size={15} className="text-blue-400" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Administration</h2>
+            <p className="mt-0.5 text-xs font-mono text-zinc-500">
+              Gestion utilisateurs, rôles, exports et activité administrateur
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          {(["json", "csv", "pdf"] as const).map((format) => (
+            <a
+              key={format}
+              href={exportUrl(format)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 rounded-lg border border-blue-600/25 bg-blue-600/10 px-3 py-2 text-xs font-semibold text-blue-400 hover:bg-blue-600/20"
+            >
+              <Download size={13} />
+              Export {format.toUpperCase()}
+            </a>
+          ))}
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-500/25 bg-red-500/10 px-4 py-3 text-xs font-mono text-red-300">
+          {error}
+        </div>
+      )}
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <section className="overflow-hidden rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
+          <div className="flex flex-wrap items-center gap-3 border-b border-border bg-[#0d0d10] px-5 py-3.5">
+            <h3 className="text-sm font-semibold">Gestion utilisateurs</h3>
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Recherche"
+              className="ml-auto rounded-lg border border-border bg-muted px-3 py-2 text-xs text-zinc-200 outline-none"
+            />
+            <select
+              value={role}
+              onChange={(event) => setRole(event.target.value)}
+              className="rounded-lg border border-border bg-muted px-3 py-2 text-xs text-zinc-200 outline-none"
+            >
+              <option value="">Tous les rôles</option>
+              {ROLE_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+            <button
+              onClick={() => void loadUsers(1)}
+              className="rounded-lg border border-blue-600/25 bg-blue-600/10 px-3 py-2 text-xs font-semibold text-blue-400"
+            >
+              Filtrer
+            </button>
+          </div>
+
+          <div className="hidden grid-cols-[60px_1fr_1fr_150px_120px_130px] gap-3 border-b border-border bg-muted/30 px-5 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-600 md:grid">
+            <span>ID</span>
+            <span>Utilisateur</span>
+            <span>Email</span>
+            <span>Rôle</span>
+            <span>Statut</span>
+            <span>Actions</span>
+          </div>
+
+          <div className="divide-y divide-border/40">
+            {loading ? (
+              <div className="flex h-40 items-center justify-center text-xs font-mono text-zinc-500">
+                <Loader2 size={18} className="mr-2 animate-spin" /> Chargement...
+              </div>
+            ) : users.length === 0 ? (
+              <div className="flex h-40 items-center justify-center text-xs font-mono text-zinc-500">
+                Aucun utilisateur
+              </div>
+            ) : users.map((user) => (
+              <div key={user.id} className="grid gap-3 px-5 py-3 text-xs md:grid-cols-[60px_1fr_1fr_150px_120px_130px] md:items-center">
+                <span className="font-mono text-zinc-500">#{user.id}</span>
+                <span className="text-zinc-200">{user.username}</span>
+                <span className="truncate font-mono text-zinc-500">{user.email || "-"}</span>
+                <select
+                  value={user.role}
+                  disabled={currentUser?.role !== "super_admin" && !["user", "auditor"].includes(user.role)}
+                  onChange={(event) => void handleRoleChange(user, event.target.value)}
+                  className="rounded-lg border border-border bg-muted px-2 py-1.5 text-xs text-zinc-200 outline-none disabled:opacity-50"
+                >
+                  {ROLE_OPTIONS.map((item) => (
+                    <option
+                      key={item}
+                      value={item}
+                      disabled={currentUser?.role !== "super_admin" && !["user", "auditor"].includes(item)}
+                    >
+                      {item}
+                    </option>
+                  ))}
+                </select>
+                <span className={user.isActive ? "text-emerald-400" : "text-red-400"}>
+                  {user.isActive ? "Actif" : "Désactivé"}
+                </span>
+                <button
+                  disabled={user.id === currentUser?.id || !user.isActive}
+                  onClick={() => void handleDeactivate(user)}
+                  className="rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300 disabled:opacity-40"
+                >
+                  Désactiver
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between border-t border-border bg-[#0d0d10] px-5 py-3">
+            <span className="text-[10px] font-mono text-zinc-500">
+              Page {pagination.page} / {pagination.totalPages} · {pagination.total} utilisateur(s)
+            </span>
+            <div className="flex gap-2">
+              <button disabled={pagination.page <= 1} onClick={() => void loadUsers(pagination.page - 1)} className="rounded border border-zinc-800 px-2 py-1 text-[10px] text-zinc-500 disabled:opacity-40">Précédent</button>
+              <button disabled={pagination.page >= pagination.totalPages} onClick={() => void loadUsers(pagination.page + 1)} className="rounded border border-zinc-800 px-2 py-1 text-[10px] text-zinc-500 disabled:opacity-40">Suivant</button>
+            </div>
+          </div>
+        </section>
+
+        <aside className="space-y-5">
+          <section className="rounded-xl border border-zinc-800/80 bg-card/95 p-5 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
+            <h3 className="text-sm font-semibold">Historique exports</h3>
+            <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+              Les exports JSON, CSV et PDF sont journalisés dans `user_action_logs` avec le type `REPORT_EXPORTED`.
+            </p>
+          </section>
+          <section className="rounded-xl border border-zinc-800/80 bg-card/95 p-5 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
+            <h3 className="text-sm font-semibold">Activité administrateurs</h3>
+            <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+              Les changements de rôle, désactivations et consultations admin apparaissent en temps réel dans le dashboard audit.
+            </p>
+          </section>
+        </aside>
+      </div>
     </main>
   );
 }
@@ -1752,6 +2162,7 @@ function SshSecurityView() {
 
                   <button
                     type="button"
+                    onClick={() => void trackUserAction("SSH_KEY_DELETED", key.name, { fingerprint: key.fingerprint, type: key.type })}
                     className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-500/25 bg-red-500/[0.08] px-3 py-2 text-xs font-semibold text-red-300 transition hover:border-red-400/35 hover:bg-red-500/15 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/30"
                   >
                     <Trash size={13} />
@@ -1786,6 +2197,7 @@ function SshSecurityView() {
                 </p>
                 <button
                   type="button"
+                  onClick={() => void trackUserAction("SSH_KEY_ADDED", "Clé SSH", { source: "ssh-security-view" })}
                   className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/20 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35"
                 >
                   <KeyRound size={14} />
@@ -1811,7 +2223,10 @@ function SshSecurityView() {
 
           <button
             type="button"
-            onClick={() => setPasswordAccessDisabled((enabled) => !enabled)}
+            onClick={() => {
+              setPasswordAccessDisabled((enabled) => !enabled);
+              void trackUserAction("SETTINGS_UPDATED", "Politique SSH", { setting: "passwordAccessDisabled" });
+            }}
             className="flex w-full items-center justify-between gap-4 rounded-lg border border-border bg-[#0d0d10] p-4 text-left transition hover:border-emerald-500/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35"
             aria-pressed={passwordAccessDisabled}
           >
@@ -1900,7 +2315,7 @@ function SecurityAccessSettings() {
     },
     {
       label: "Sessions courtes pour consoles distantes",
-      detail: "Expiration simulée après 30 minutes d'inactivité",
+      detail: "Expiration après 30 minutes d'inactivité",
       enabled: shortSessions,
       setEnabled: setShortSessions,
     },
@@ -1924,7 +2339,10 @@ function SecurityAccessSettings() {
             <button
               key={label}
               type="button"
-              onClick={() => setEnabled((value) => !value)}
+              onClick={() => {
+                setEnabled((value) => !value);
+                void trackUserAction("SETTINGS_UPDATED", label, { area: "security-access", enabled: !enabled });
+              }}
               className="flex w-full items-center justify-between gap-5 px-5 py-4 text-left transition hover:bg-blue-500/[0.06] hover:shadow-[inset_2px_0_0_rgba(59,130,246,0.45)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
               aria-pressed={enabled}
             >
@@ -1950,13 +2368,13 @@ function SecurityAccessSettings() {
 
       <aside className="rounded-xl border border-zinc-800/80 bg-card/95 p-5 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
         <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">
-          Simulation d'accès
+          État des règles
         </p>
         <div className="mt-4 space-y-3">
           {[
-            ["Tentatives refusées", "12", "text-red-400"],
-            ["Sessions actives", "2", "text-emerald-400"],
-            ["Dernier contrôle", "Aujourd'hui 11:28", "text-blue-400"],
+            ["Double validation", mfaRequired ? "Active" : "Inactive", mfaRequired ? "text-emerald-400" : "text-zinc-500"],
+            ["Sessions courtes", shortSessions ? "Actives" : "Inactives", shortSessions ? "text-emerald-400" : "text-zinc-500"],
+            ["Audit profil", profileAudit ? "Actif" : "Inactif", profileAudit ? "text-blue-400" : "text-zinc-500"],
           ].map(([label, value, color]) => (
             <div key={label} className="flex items-center justify-between gap-4">
               <span className="text-[11px] text-zinc-600">{label}</span>
@@ -1984,7 +2402,10 @@ function AuditAiSettings() {
         <div className="space-y-5 px-5 py-5">
           <button
             type="button"
-            onClick={() => setEnabled((value) => !value)}
+            onClick={() => {
+              setEnabled((value) => !value);
+              void trackUserAction("SETTINGS_UPDATED", "Assistant IA", { enabled: !enabled });
+            }}
             className="flex w-full items-center justify-between gap-4 rounded-lg border border-border bg-[#0d0d10] p-4 text-left transition hover:border-violet-500/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/35"
             aria-pressed={enabled}
           >
@@ -2015,7 +2436,10 @@ function AuditAiSettings() {
             </span>
             <select
               value={sensitivity}
-              onChange={(event) => setSensitivity(event.target.value)}
+              onChange={(event) => {
+                setSensitivity(event.target.value);
+                void trackUserAction("SETTINGS_UPDATED", "Sensibilité IA", { value: event.target.value });
+              }}
               className="w-full appearance-none rounded-lg border border-border bg-muted px-3 py-3 text-xs text-zinc-200 outline-none transition focus:border-violet-500/45 focus:ring-1 focus:ring-violet-500/25"
             >
               <option>Conservateur</option>
@@ -2028,19 +2452,13 @@ function AuditAiSettings() {
 
       <aside className="rounded-xl border border-zinc-800/80 bg-card/95 p-5 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
         <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">
-          Détections simulées
+          Détections IA
         </p>
-        <div className="mt-4 space-y-3">
-          {[
-            ["Brute-force SSH progressif", "Critique", "text-red-400"],
-            ["sudo répété hors plage habituelle", "Avertissement", "text-amber-400"],
-            ["Connexion admin depuis nouvelle IP", "À vérifier", "text-blue-400"],
-          ].map(([label, value, color]) => (
-            <div key={label} className="rounded-lg border border-zinc-800 bg-[#0d0d10] px-3 py-2.5">
-              <p className="truncate text-xs font-medium text-zinc-300">{label}</p>
-              <p className={`mt-1 text-[10px] font-mono font-semibold ${color}`}>{value}</p>
-            </div>
-          ))}
+        <div className="mt-4 rounded-lg border border-zinc-800 bg-[#0d0d10] px-3 py-4">
+          <p className="text-xs font-medium text-zinc-300">Aucune détection IA enregistrée</p>
+          <p className="mt-1 text-[10px] font-mono text-zinc-600">
+            Les détections réelles seront affichées lorsqu'un moteur d'analyse sera connecté.
+          </p>
         </div>
       </aside>
     </div>
@@ -2065,7 +2483,10 @@ function GeneralSettings() {
           </span>
           <select
             value={retentionDays}
-            onChange={(event) => setRetentionDays(event.target.value)}
+            onChange={(event) => {
+              setRetentionDays(event.target.value);
+              void trackUserAction("SETTINGS_UPDATED", "Conservation des logs", { value: event.target.value });
+            }}
             className="w-full appearance-none rounded-lg border border-border bg-muted px-3 py-3 text-xs text-zinc-200 outline-none transition focus:border-blue-500/45 focus:ring-1 focus:ring-blue-500/25"
           >
             <option>30 jours</option>
@@ -2077,7 +2498,10 @@ function GeneralSettings() {
 
         <button
           type="button"
-          onClick={() => setAutoRefresh((value) => !value)}
+          onClick={() => {
+            setAutoRefresh((value) => !value);
+            void trackUserAction("SETTINGS_UPDATED", "Actualisation automatique", { enabled: !autoRefresh });
+          }}
           className="flex items-center justify-between gap-4 rounded-lg border border-border bg-[#0d0d10] p-4 text-left transition hover:border-blue-500/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
           aria-pressed={autoRefresh}
         >
@@ -2176,6 +2600,7 @@ function ParametresView() {
                   </div>
                   <button
                     type="button"
+                    onClick={() => void trackUserAction("SETTINGS_UPDATED", "Token agent copié", { target: "agent-token" })}
                     className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-700 px-3 py-3 text-xs font-semibold text-zinc-300 transition hover:border-blue-500/50 hover:bg-blue-500/10 hover:text-blue-300"
                     title="Copier le token"
                   >
@@ -2184,6 +2609,7 @@ function ParametresView() {
                   </button>
                   <button
                     type="button"
+                    onClick={() => void trackUserAction("SETTINGS_UPDATED", "Token agent régénéré", { target: "agent-token" })}
                     className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/20 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35"
                   >
                     <RotateCw size={14} />
@@ -2276,30 +2702,151 @@ function ParametresView() {
 
 export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [activeNav, setActiveNav] = useState<NavId>("dashboard");
+  const currentUser = getCurrentUser();
   const [playing,   setPlaying]   = useState(true);
-  const [logs,      setLogs]      = useState<LogEntry[]>(SEED);
+  const [logs,      setLogs]      = useState<AuditLog[]>([]);
+  const [loading,   setLoading]   = useState(true);
+  const [journalctlBusy, setJournalctlBusy] = useState(false);
+  const [journalctlStatus, setJournalctlStatus] = useState<JournalctlLiveStatus | null>(null);
+  const [error,     setError]     = useState<string | null>(null);
+  const [query,     setQuery]     = useState<Required<Pick<AuditLogQuery, "page" | "limit">> & Omit<AuditLogQuery, "page" | "limit">>({
+    page: 1,
+    limit: 20,
+    search: "",
+    severity: "",
+    event_type: "",
+    source_type: "",
+    date_from: "",
+    date_to: "",
+  });
+  const [pagination, setPagination] = useState<AuditLogPagination>({
+    page: 1,
+    limit: 20,
+    total: 0,
+    totalPages: 1,
+  });
+  const didMountRef = useRef(false);
 
   useEffect(() => { document.documentElement.classList.add("dark"); }, []);
 
+  const loadLogs = useCallback(async (nextQuery: typeof query) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const hasSearch = Boolean(nextQuery.search?.trim());
+      const hasFilters = Boolean(nextQuery.severity || nextQuery.event_type || nextQuery.source_type || nextQuery.date_from || nextQuery.date_to);
+      const response = hasSearch
+        ? await searchAuditLogs(nextQuery.search ?? "", nextQuery)
+        : hasFilters
+        ? await filterAuditLogs(nextQuery)
+        : await getAuditLogs(nextQuery);
+
+      setLogs(response.data);
+      setPagination(response.pagination);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Impossible de charger les logs d'audit");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    if (!playing) return;
-    const id = setInterval(() => setLogs((p) => [mkLiveLog(), ...p].slice(0, 200)), 3000);
-    return () => clearInterval(id);
-  }, [playing]);
+    const timer = window.setTimeout(() => {
+      void loadLogs(query);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [loadLogs, query]);
+
+  useEffect(() => {
+    const socket = connectAuditLogSocket((log) => {
+      if (!playing || query.page !== 1) return;
+
+      setLogs((current) => {
+        if (current.some((item) => item.id === log.id)) return current;
+        return [log, ...current].slice(0, query.limit);
+      });
+      setPagination((current) => ({ ...current, total: current.total + 1 }));
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [playing, query.page, query.limit]);
+
+  useEffect(() => {
+    void getJournalctlLiveStatus()
+      .then(setJournalctlStatus)
+      .catch(() => {
+        setJournalctlStatus(null);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+
+    void trackUserAction("NAVIGATE", NAV_LABELS[activeNav], { section: activeNav });
+  }, [activeNav]);
 
   const handleClear = useCallback(() => {
     setLogs([]);
-    _idCtr = 1;
+    void trackUserAction("CLEAR_LIVE_FEED", "Historique Live");
   }, []);
 
-  const nav = (id: NavId) => setActiveNav(id);
+  const handleToggleJournalctlLive = useCallback(async () => {
+    setJournalctlBusy(true);
+    setError(null);
+
+    try {
+      const nextStatus = journalctlStatus?.running
+        ? await stopJournalctlLive()
+        : await startJournalctlLive();
+      setJournalctlStatus(nextStatus);
+      await loadLogs({ ...query, page: 1 });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Action journalctl -f impossible");
+    } finally {
+      setJournalctlBusy(false);
+    }
+  }, [journalctlStatus?.running, loadLogs, query]);
+
+  const handleQueryChange = useCallback((nextQuery: AuditLogQuery) => {
+    setQuery((current) => ({
+      ...current,
+      ...nextQuery,
+      page: nextQuery.page ?? current.page,
+      limit: nextQuery.limit ?? current.limit,
+    }));
+  }, []);
+
+  const nav = (id: NavId) => {
+    if (id === "administration" && !isAdminRole(currentUser?.role)) return;
+    setActiveNav(id);
+  };
 
   return (
-    <Shell active={activeNav} onNav={nav} onLogout={onLogout}>
+    <Shell active={activeNav} onNav={nav} onLogout={onLogout} canUseAdmin={isAdminRole(currentUser?.role)}>
       {activeNav === "live" ? (
-        <HistoriqueLiveView logs={logs} playing={playing} setPlaying={setPlaying} onClear={handleClear} />
+        <HistoriqueLiveView
+          logs={logs}
+          pagination={pagination}
+          query={query}
+          loading={loading}
+          error={error}
+          playing={playing}
+          setPlaying={setPlaying}
+          onQueryChange={handleQueryChange}
+          onClear={handleClear}
+          onToggleJournalctlLive={handleToggleJournalctlLive}
+          journalctlStatus={journalctlStatus}
+          journalctlBusy={journalctlBusy}
+        />
       ) : activeNav === "dashboard" ? (
-        <DashboardView logs={logs} playing={playing} setPlaying={setPlaying} />
+        <DashboardView logs={logs} loading={loading} error={error} playing={playing} setPlaying={setPlaying} />
       ) : activeNav === "rapports" ? (
         <RapportsView />
       ) : activeNav === "parametres" ? (
@@ -2308,6 +2855,8 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
         <ProfilView />
       ) : activeNav === "sessions" ? (
         <SessionsView />
+      ) : activeNav === "administration" ? (
+        <AdministrationView />
       ) : activeNav === "ssh" ? (
         <SshSecurityView />
       ) : (

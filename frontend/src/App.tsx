@@ -1,7 +1,9 @@
+import { useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import "./App.css";
 import Login from "./components/Login";
 import Dashboard from "./pages/Dashboard";
+import { trackUserAction } from "./api/authApi";
 
 function hasAuthToken() {
   return Boolean(localStorage.getItem("token"));
@@ -22,10 +24,21 @@ function AppRoutes() {
     navigate("/dashboard", { replace: true });
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await trackUserAction("LOGOUT", "Session utilisateur");
     localStorage.removeItem("token");
+    localStorage.removeItem("user");
     navigate("/login", { replace: true });
   };
+
+  useEffect(() => {
+    const onUnauthorized = () => {
+      navigate("/login", { replace: true });
+    };
+
+    window.addEventListener("auth:unauthorized", onUnauthorized);
+    return () => window.removeEventListener("auth:unauthorized", onUnauthorized);
+  }, [navigate]);
 
   return (
     <Routes>

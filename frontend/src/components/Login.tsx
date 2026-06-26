@@ -23,7 +23,11 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [showSignUpPassword, setShowSignUpPassword] = useState<boolean>(false);
   const [signInIdentifier, setSignInIdentifier] = useState<string>('');
   const [signInPassword, setSignInPassword] = useState<string>('');
-  const [signInError, setSignInError] = useState<string | null>(null);
+  const [signInError, setSignInError] = useState<string | null>(() => {
+    const message = localStorage.getItem('authMessage');
+    localStorage.removeItem('authMessage');
+    return message;
+  });
   const [isSignInSubmitting, setIsSignInSubmitting] = useState<boolean>(false);
   const [signUpUsername, setSignUpUsername] = useState<string>('');
   const [signUpPassword, setSignUpPassword] = useState<string>('');

@@ -1,9 +1,10 @@
 const pool = require('../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { recordUserAction } = require('./userActionService');
 
 // --- LOGIN ---
-const authenticateUser = async (username, password) => {
+const authenticateUser = async (username, password, req) => {
   const result = await pool.query(
     'SELECT * FROM users WHERE username = $1 AND is_active = TRUE',
     [username]
@@ -26,6 +27,16 @@ const authenticateUser = async (username, password) => {
     ['auth-service', 'IP_INCONNUE_POUR_LE_SERVICE', 'LOGIN_SUCCESS', 'INFO', `Login réussi: ${username}`]
   );
 
+  await recordUserAction({
+    user,
+    actionType: 'LOGIN_SUCCESS',
+    resource: 'Authentification',
+    req,
+    details: { role: user.role },
+  });
+
+  await pool.query('UPDATE users SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
+
   const token = jwt.sign(
     { id: user.id, username: user.username, role: user.role }, // role est récupéré de la DB
     process.env.JWT_SECRET,
@@ -34,20 +45,29 @@ const authenticateUser = async (username, password) => {
 
   return {
     token,
-    user: { id: user.id, username: user.username, role: user.role }
+    user: {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      firstName: user.first_name,
+      lastName: user.last_name,
+      email: user.email,
+    }
   };
 };
 
 // --- REGISTER ---
-const createUser = async (username, password) => { // role retiré des arguments
+const createUser = async (username, password, req, profile = {}) => { // role retiré des arguments
   // 1. Hasher le mot de passe
   const saltRounds = 10;
   const hashedPassword = await bcrypt.hash(password, saltRounds);
 
   // 2. Insérer l'utilisateur dans la base de données avec le rôle par défaut
   const result = await pool.query(
-    'INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, username, role',
-    [username, hashedPassword, 'auditor'] // <-- Role fixé à 'auditor'
+    `INSERT INTO users (username, password_hash, role, first_name, last_name, email)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id, username, role, first_name, last_name, email`,
+    [username, hashedPassword, 'user', profile.firstName || null, profile.lastName || null, profile.email || null]
   );
 
   const newUser = result.rows[0];
@@ -58,6 +78,14 @@ const createUser = async (username, password) => { // role retiré des arguments
      VALUES ($1, $2, $3, $4, $5)`,
     ['auth-service', 'IP_INCONNUE_POUR_LE_SERVICE', 'USER_REGISTERED', 'INFO', `Nouvel utilisateur créé: ${username}`]
   );
+
+  await recordUserAction({
+    user: newUser,
+    actionType: 'USER_REGISTERED',
+    resource: 'Création du compte',
+    req,
+    details: { createdBy: 'self-registration' },
+  });
 
   return newUser;
 };
