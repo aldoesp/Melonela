@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Activity, BarChart2, FileText, Settings,
   Search, Bell, Shield, ChevronDown, ChevronRight, Play, Pause,
   Download, TrendingUp, TrendingDown, Server, AlertTriangle,
-  XCircle, LogOut, Trash2, Filter, Terminal, Wifi, Hash,
+  XCircle, LogOut, Trash2, Filter, Terminal, Hash,
   BrainCircuit,
   FileDown, FileCog, CalendarDays, CheckSquare, Square,
   Clock, HardDrive, CheckCircle2, Loader2, XCircle as XCircleIcon,
@@ -566,7 +566,7 @@ function DashboardView({
         </div>
         <div className="grid gap-2 px-5 py-2.5 border-b border-border bg-muted/40 text-[10px] font-semibold text-zinc-600 uppercase tracking-wider"
           style={{ gridTemplateColumns: "90px 155px 115px 1fr 145px 125px 32px" }}>
-          <span>Heure</span><span>Type</span><span>Source</span><span>Message</span><span>Dangerosité</span><span>Origine</span><span />
+          <span>Heure</span><span>Service</span><span>Utilisateur</span><span>Message</span><span>Dangerosité</span><span>Commande</span><span />
         </div>
         <div className="overflow-y-auto max-h-64" style={{ scrollbarWidth: "none" } as React.CSSProperties}>
           {loading ? (
@@ -587,11 +587,11 @@ function DashboardView({
                 className={`w-full grid gap-2 px-5 py-2.5 text-left text-xs border-b border-border/40 transition-colors group ${idx % 2 === 0 ? "bg-card" : "bg-muted/10"} hover:bg-blue-600/5`}
                 style={{ gridTemplateColumns: "90px 155px 115px 1fr 145px 125px 32px" }}>
                 <span className="font-mono text-zinc-500 tabular-nums text-[11px]">{formatTime(log.eventTimestamp)}</span>
-                <span className="text-zinc-400 truncate font-mono text-[11px]">{log.eventType}</span>
-                <span className="text-zinc-300 flex items-center gap-1.5 truncate"><Server size={10} className="text-zinc-600 flex-shrink-0" />{log.sourceName}</span>
+                <span className="text-zinc-400 truncate font-mono text-[11px]">{log.service ?? log.eventType}</span>
+                <span className="text-zinc-300 flex items-center gap-1.5 truncate"><Server size={10} className="text-zinc-600 flex-shrink-0" />{log.username ?? "-"}</span>
                 <span className="text-zinc-200 truncate">{log.message}</span>
                 <span><Badge level={severity} /></span>
-                <span className="font-mono text-zinc-500 text-[11px]">{log.sourceType}</span>
+                <span className="font-mono text-zinc-500 text-[11px] truncate">{log.command ?? "-"}</span>
                 <span className="flex items-center justify-center">
                   <ChevronDown size={13} className={`text-zinc-500 group-hover:text-zinc-400 transition-transform duration-200 ${expanded === log.id ? "rotate-180 text-blue-400" : ""}`} />
                 </span>
@@ -615,7 +615,7 @@ function DashboardView({
 
 // ── Historique Live view ───────────────────────────────────────────────────────
 
-const COL = "44px 120px 112px 150px 1fr 148px 120px 36px";
+const COL = "44px 104px 108px 118px 116px 170px 1fr 96px 36px";
 
 function HistoriqueLiveView({
   logs,
@@ -650,7 +650,9 @@ function HistoriqueLiveView({
   const [search, setSearch] = useState(query.search ?? "");
   const [severity, setSeverity] = useState(query.severity ?? "");
   const [eventType, setEventType] = useState(query.event_type ?? "");
-  const [sourceType, setSourceType] = useState(query.source_type ?? "");
+  const [service, setService] = useState(query.service ?? "");
+  const [username, setUsername] = useState(query.username ?? "");
+  const [command, setCommand] = useState(query.command ?? "");
   const [dateFrom, setDateFrom] = useState(query.date_from ?? "");
   const [dateTo, setDateTo] = useState(query.date_to ?? "");
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -669,20 +671,22 @@ function HistoriqueLiveView({
   const critN = logs.filter((l) => severityForLog(l) === "CRITIQUE").length;
   const warnN = logs.filter((l) => severityForLog(l) === "AVERTISSEMENT").length;
   const infoN = logs.filter((l) => severityForLog(l) === "INFO").length;
-  const hasFilter = Boolean(query.search || query.severity || query.event_type || query.source_type || query.date_from || query.date_to);
+  const hasFilter = Boolean(query.search || query.severity || query.event_type || query.service || query.username || query.command || query.date_from || query.date_to);
 
   const applyFilters = () => {
-    onQueryChange({ search, severity, event_type: eventType, source_type: sourceType, date_from: dateFrom, date_to: dateTo, page: 1 });
+    onQueryChange({ search, severity, event_type: eventType, service, username, command, date_from: dateFrom, date_to: dateTo, page: 1 });
   };
 
   const resetFilters = () => {
     setSearch("");
     setSeverity("");
     setEventType("");
-    setSourceType("");
+    setService("");
+    setUsername("");
+    setCommand("");
     setDateFrom("");
     setDateTo("");
-    onQueryChange({ search: "", severity: "", event_type: "", source_type: "", date_from: "", date_to: "", page: 1 });
+    onQueryChange({ search: "", severity: "", event_type: "", service: "", username: "", command: "", date_from: "", date_to: "", page: 1 });
   };
 
   return (
@@ -730,7 +734,7 @@ function HistoriqueLiveView({
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600/10 border border-emerald-600/25 text-emerald-400 hover:bg-emerald-600/20 disabled:opacity-50 transition-all"
           >
             {journalctlBusy ? <Loader2 size={12} className="animate-spin" /> : <RotateCw size={12} />}
-            {journalctlStatus?.running ? "Arrêter journalctl -f" : "Démarrer journalctl -f"}
+            {journalctlStatus?.running ? "Arrêter journalctl live" : "Démarrer journalctl live"}
           </button>
           <button
             onClick={() => void trackUserAction("REPORT_EXPORTED", "Historique Live", { source: "live-feed" })}
@@ -773,9 +777,17 @@ function HistoriqueLiveView({
           <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
         </div>
 
-        <input value={sourceType} onChange={(e) => setSourceType(e.target.value)}
-          className="w-32 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-blue-600/50"
-          placeholder="Source type" />
+        <input value={service} onChange={(e) => setService(e.target.value)}
+          className="w-28 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-blue-600/50"
+          placeholder="Service" />
+
+        <input value={username} onChange={(e) => setUsername(e.target.value)}
+          className="w-28 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-blue-600/50"
+          placeholder="Utilisateur" />
+
+        <input value={command} onChange={(e) => setCommand(e.target.value)}
+          className="w-36 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-blue-600/50"
+          placeholder="Commande" />
 
         <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
           className="bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-600/50 [color-scheme:dark]" />
@@ -810,12 +822,13 @@ function HistoriqueLiveView({
         <div className="grid gap-2 px-4 py-2.5 border-b border-border bg-[#0d0d10] text-[10px] font-semibold text-zinc-600 uppercase tracking-widest flex-shrink-0"
           style={{ gridTemplateColumns: COL }}>
           <span className="flex items-center gap-1"><Hash size={9} />ID</span>
-          <span>Heure</span>
-          <span>Sévérité</span>
-          <span>Source</span>
+          <span>Date</span>
+          <span>Service</span>
+          <span>Utilisateur</span>
+          <span>PWD</span>
+          <span>Commande</span>
           <span>Message</span>
-          <span>Dangerosité</span>
-          <span className="flex items-center gap-1"><Wifi size={9} />Type source</span>
+          <span>Cible</span>
           <span />
         </div>
 
@@ -857,13 +870,17 @@ function HistoriqueLiveView({
 
                   <span className="font-mono text-[10px] text-zinc-500 tabular-nums self-center">#{log.id}</span>
                   <span className="font-mono text-[11px] text-zinc-500 tabular-nums self-center">{formatTime(log.eventTimestamp)}</span>
-                  <span className="font-mono text-[11px] text-zinc-400 truncate self-center">{log.severity}</span>
+                  <span className="font-mono text-[11px] text-zinc-400 truncate self-center">{log.service ?? log.sourceType}</span>
                   <span className="text-[11px] text-zinc-300 flex items-center gap-1 truncate self-center">
-                    <Server size={9} className="text-zinc-500 flex-shrink-0" />{log.sourceName}
+                    <Server size={9} className="text-zinc-500 flex-shrink-0" />{log.username ?? "-"}
                   </span>
-                  <span className={`text-[11px] font-medium truncate self-center ${SEV[severity].text}`}>{log.message}</span>
-                  <span className="self-center"><Badge level={severity} /></span>
-                  <span className="font-mono text-[11px] text-zinc-500 self-center">{log.sourceType}</span>
+                  <span className="font-mono text-[11px] text-zinc-500 truncate self-center">{log.workingDirectory ?? "-"}</span>
+                  <span className="font-mono text-[11px] text-zinc-400 truncate self-center">{log.command ?? "-"}</span>
+                  <span className={`text-[11px] font-medium truncate self-center ${SEV[severity].text}`}>
+                    {log.message}
+                    <span className="ml-2"><Badge level={severity} /></span>
+                  </span>
+                  <span className="font-mono text-[11px] text-zinc-500 self-center">{log.targetUser ?? "-"}</span>
                   <span className="flex items-center justify-center self-center">
                     <ChevronDown size={13} className={`text-zinc-500 group-hover:text-zinc-400 transition-transform duration-200 ${isOpen ? "rotate-180 text-blue-400" : ""}`} />
                   </span>
@@ -892,8 +909,11 @@ function HistoriqueLiveView({
                       <div className="w-44 flex-shrink-0 space-y-3">
                         {([
                           ["Type",        eventLabel(log.eventType)],
-                          ["Source",      log.sourceName],
-                          ["Origine",     log.sourceType],
+                          ["Service",     log.service ?? "-"],
+                          ["Utilisateur", log.username ?? "-"],
+                          ["PWD",         log.workingDirectory ?? "-"],
+                          ["Cible",       log.targetUser ?? "-"],
+                          ["Commande",    log.command ?? "-"],
                           ["Sévérité",    severity],
                           ["Reçue",       formatTime(log.receivedAt)],
                         ] as [string, string][]).map(([k, v]) => (
@@ -919,10 +939,19 @@ function HistoriqueLiveView({
                           timestamp:   log.eventTimestamp,
                           source_name: log.sourceName,
                           source_type: log.sourceType,
+                          service:     log.service,
+                          process_name: log.processName,
+                          process_id:  log.processId,
+                          host_name:   log.hostName,
                           event_type:  log.eventType,
                           libelle:     eventLabel(log.eventType),
                           severity:    log.severity,
                           dangerosite: severity,
+                          username:    log.username,
+                          tty:         log.tty,
+                          working_directory: log.workingDirectory,
+                          target_user: log.targetUser,
+                          command:     log.command,
                           message:     log.message,
                           received_at: log.receivedAt,
                           raw_payload: log.rawPayload,
@@ -2716,6 +2745,10 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     severity: "",
     event_type: "",
     source_type: "",
+    service: "",
+    username: "",
+    command: "",
+    working_directory: "",
     date_from: "",
     date_to: "",
   });
@@ -2735,7 +2768,17 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
 
     try {
       const hasSearch = Boolean(nextQuery.search?.trim());
-      const hasFilters = Boolean(nextQuery.severity || nextQuery.event_type || nextQuery.source_type || nextQuery.date_from || nextQuery.date_to);
+      const hasFilters = Boolean(
+        nextQuery.severity
+        || nextQuery.event_type
+        || nextQuery.source_type
+        || nextQuery.service
+        || nextQuery.username
+        || nextQuery.command
+        || nextQuery.working_directory
+        || nextQuery.date_from
+        || nextQuery.date_to
+      );
       const response = hasSearch
         ? await searchAuditLogs(nextQuery.search ?? "", nextQuery)
         : hasFilters
@@ -2765,7 +2808,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
 
       setLogs((current) => {
         if (current.some((item) => item.id === log.id)) return current;
-        return [log, ...current].slice(0, query.limit);
+        return [log, ...current].slice(0, 100);
       });
       setPagination((current) => ({ ...current, total: current.total + 1 }));
     });

@@ -12,8 +12,17 @@ function mapSystemEventLog(row) {
     id: row.id,
     sourceName: row.source_name,
     sourceType: row.source_type,
+    service: row.service,
+    processName: row.process_name,
+    processId: row.process_id,
+    hostName: row.host_name,
     eventType: row.event_type,
     severity: row.severity,
+    username: row.username,
+    tty: row.tty,
+    workingDirectory: row.working_directory,
+    targetUser: row.target_user,
+    command: row.command,
     message: row.message,
     rawPayload: row.raw_payload || {},
     normalizedPayload: row.normalized_payload || {},
@@ -29,8 +38,17 @@ async function ensureSystemEventLogTable() {
       id SERIAL PRIMARY KEY,
       source_name VARCHAR(120) NOT NULL,
       source_type VARCHAR(80) NOT NULL,
+      service VARCHAR(100),
+      process_name VARCHAR(100),
+      process_id VARCHAR(50),
+      host_name VARCHAR(100),
       event_type VARCHAR(100) NOT NULL,
       severity VARCHAR(20) NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+      username VARCHAR(100),
+      tty VARCHAR(100),
+      working_directory TEXT,
+      target_user VARCHAR(100),
+      command TEXT,
       message TEXT NOT NULL,
       raw_payload JSONB DEFAULT '{}'::jsonb,
       normalized_payload JSONB DEFAULT '{}'::jsonb,
@@ -40,9 +58,23 @@ async function ensureSystemEventLogTable() {
     )
   `);
 
+  await pool.query('ALTER TABLE system_event_logs ADD COLUMN IF NOT EXISTS service VARCHAR(100)');
+  await pool.query('ALTER TABLE system_event_logs ADD COLUMN IF NOT EXISTS process_name VARCHAR(100)');
+  await pool.query('ALTER TABLE system_event_logs ADD COLUMN IF NOT EXISTS process_id VARCHAR(50)');
+  await pool.query('ALTER TABLE system_event_logs ADD COLUMN IF NOT EXISTS host_name VARCHAR(100)');
+  await pool.query('ALTER TABLE system_event_logs ADD COLUMN IF NOT EXISTS username VARCHAR(100)');
+  await pool.query('ALTER TABLE system_event_logs ADD COLUMN IF NOT EXISTS tty VARCHAR(100)');
+  await pool.query('ALTER TABLE system_event_logs ADD COLUMN IF NOT EXISTS working_directory TEXT');
+  await pool.query('ALTER TABLE system_event_logs ADD COLUMN IF NOT EXISTS target_user VARCHAR(100)');
+  await pool.query('ALTER TABLE system_event_logs ADD COLUMN IF NOT EXISTS command TEXT');
+
   await pool.query('CREATE INDEX IF NOT EXISTS idx_system_event_logs_severity ON system_event_logs(severity)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_system_event_logs_event_type ON system_event_logs(event_type)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_system_event_logs_source_type ON system_event_logs(source_type)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_system_event_logs_service ON system_event_logs(service)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_system_event_logs_username ON system_event_logs(username)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_system_event_logs_command ON system_event_logs(command)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_system_event_logs_working_directory ON system_event_logs(working_directory)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_system_event_logs_received_at ON system_event_logs(received_at DESC)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_system_event_logs_event_timestamp ON system_event_logs(event_timestamp DESC)');
 }
@@ -59,6 +91,10 @@ function buildWhereClause(filters) {
       OR source_type ILIKE $${index}
       OR event_type ILIKE $${index}
       OR severity ILIKE $${index}
+      OR COALESCE(service, '') ILIKE $${index}
+      OR COALESCE(username, '') ILIKE $${index}
+      OR COALESCE(command, '') ILIKE $${index}
+      OR COALESCE(working_directory, '') ILIKE $${index}
       OR message ILIKE $${index}
       OR raw_payload::text ILIKE $${index}
       OR normalized_payload::text ILIKE $${index}
@@ -80,6 +116,26 @@ function buildWhereClause(filters) {
     conditions.push(`source_type = $${values.length}`);
   }
 
+  if (filters.service) {
+    values.push(filters.service);
+    conditions.push(`service = $${values.length}`);
+  }
+
+  if (filters.username) {
+    values.push(filters.username);
+    conditions.push(`username = $${values.length}`);
+  }
+
+  if (filters.command) {
+    values.push(`%${filters.command}%`);
+    conditions.push(`command ILIKE $${values.length}`);
+  }
+
+  if (filters.workingDirectory) {
+    values.push(`%${filters.workingDirectory}%`);
+    conditions.push(`working_directory ILIKE $${values.length}`);
+  }
+
   if (filters.dateFrom) {
     values.push(filters.dateFrom);
     conditions.push(`event_timestamp >= $${values.length}`);
@@ -99,15 +155,26 @@ function buildWhereClause(filters) {
 async function insertSystemEventLog(log) {
   const result = await pool.query(
     `INSERT INTO system_event_logs
-      (source_name, source_type, event_type, severity, message, raw_payload, normalized_payload, event_timestamp)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     RETURNING id, source_name, source_type, event_type, severity, message, raw_payload, normalized_payload,
+      (source_name, source_type, service, process_name, process_id, host_name, event_type, severity,
+       username, tty, working_directory, target_user, command, message, raw_payload, normalized_payload, event_timestamp)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+     RETURNING id, source_name, source_type, service, process_name, process_id, host_name, event_type, severity,
+       username, tty, working_directory, target_user, command, message, raw_payload, normalized_payload,
        event_timestamp, received_at, created_at`,
     [
       log.source_name,
       log.source_type,
+      log.service || null,
+      log.process_name || null,
+      log.process_id || null,
+      log.host_name || null,
       log.event_type,
       log.severity,
+      log.username || null,
+      log.tty || null,
+      log.working_directory || null,
+      log.target_user || null,
+      log.command || null,
       log.message,
       log.raw_payload || {},
       log.normalized_payload || {},
@@ -130,6 +197,10 @@ async function listAuditLogs(query = {}) {
     severity: typeof query.severity === 'string' ? query.severity.trim() : '',
     eventType: typeof query.event_type === 'string' ? query.event_type.trim() : (query.eventType || ''),
     sourceType: typeof query.source_type === 'string' ? query.source_type.trim() : (query.sourceType || ''),
+    service: typeof query.service === 'string' ? query.service.trim() : '',
+    username: typeof query.username === 'string' ? query.username.trim() : '',
+    command: typeof query.command === 'string' ? query.command.trim() : '',
+    workingDirectory: typeof query.working_directory === 'string' ? query.working_directory.trim() : (query.workingDirectory || ''),
     dateFrom: query.date_from || query.dateFrom || query.startDate || '',
     dateTo: query.date_to || query.dateTo || query.endDate || '',
   };
@@ -145,7 +216,8 @@ async function listAuditLogs(query = {}) {
   const totalPages = Math.max(Math.ceil(total / limit), 1);
 
   const dataResult = await pool.query(
-    `SELECT id, source_name, source_type, event_type, severity, message, raw_payload, normalized_payload,
+    `SELECT id, source_name, source_type, service, process_name, process_id, host_name, event_type, severity,
+       username, tty, working_directory, target_user, command, message, raw_payload, normalized_payload,
        event_timestamp, received_at, created_at
      FROM system_event_logs
      ${clause}

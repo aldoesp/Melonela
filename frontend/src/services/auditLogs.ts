@@ -6,8 +6,17 @@ export interface AuditLog {
   id: number;
   sourceName: string;
   sourceType: string;
+  service: string | null;
+  processName: string | null;
+  processId: string | null;
+  hostName: string | null;
   eventType: string;
   severity: "low" | "medium" | "high" | "critical";
+  username: string | null;
+  tty: string | null;
+  workingDirectory: string | null;
+  targetUser: string | null;
+  command: string | null;
   message: string;
   rawPayload: Record<string, unknown>;
   normalizedPayload: Record<string, unknown>;
@@ -23,6 +32,10 @@ export interface AuditLogQuery {
   severity?: string;
   event_type?: string;
   source_type?: string;
+  service?: string;
+  username?: string;
+  command?: string;
+  working_directory?: string;
   date_from?: string;
   date_to?: string;
 }
@@ -134,15 +147,15 @@ async function requestJournalctlLive(path: string, method = "GET"): Promise<Jour
 }
 
 export function getJournalctlLiveStatus() {
-  return requestJournalctlLive("/api/ingest/journalctl/follow/status");
+  return requestJournalctlLive("/api/ingest/journalctl/status");
 }
 
 export function startJournalctlLive() {
-  return requestJournalctlLive("/api/ingest/journalctl/follow/start", "POST");
+  return requestJournalctlLive("/api/ingest/journalctl/start", "POST");
 }
 
 export function stopJournalctlLive() {
-  return requestJournalctlLive("/api/ingest/journalctl/follow/stop", "POST");
+  return requestJournalctlLive("/api/ingest/journalctl/stop", "POST");
 }
 
 export async function collectJournalctlLogs(): Promise<JournalctlLiveStatus> {

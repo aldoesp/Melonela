@@ -33,7 +33,7 @@ npm run preview
 Se connecter dans Melonela avec un compte `admin` ou `super_admin`, récupérer le JWT, puis appeler :
 
 ```bash
-curl -X POST "http://localhost:5000/api/ingest/journalctl/follow/start" \
+curl -X POST "http://localhost:5000/api/ingest/journalctl/start" \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -65,12 +65,12 @@ curl -X POST "http://localhost:5000/api/ingest/journalctl/collect" \
 ## Vérifier ou arrêter le live
 
 ```bash
-curl "http://localhost:5000/api/ingest/journalctl/follow/status" \
+curl "http://localhost:5000/api/ingest/journalctl/status" \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
 ```bash
-curl -X POST "http://localhost:5000/api/ingest/journalctl/follow/stop" \
+curl -X POST "http://localhost:5000/api/ingest/journalctl/stop" \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -92,7 +92,7 @@ docker exec -it melonela_postgres psql -U melonela_user -d melonela_db \
 
 ## Tester WebSocket
 
-Ouvrir le dashboard React, section **Historique Live**, puis cliquer sur **Démarrer journalctl -f**.
+Ouvrir le dashboard React, section **Historique Live**, puis cliquer sur **Démarrer journalctl live**.
 
 Chaque log inséré doit apparaître via l'événement Socket.io :
 

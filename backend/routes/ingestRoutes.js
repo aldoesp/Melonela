@@ -11,6 +11,10 @@ const router = express.Router();
 
 const requireJournalctlAdmin = requireRole(['admin', 'super_admin']);
 
+router.get('/journalctl/status', authMiddleware, requireJournalctlAdmin, getJournalctlLiveStatus);
+router.post('/journalctl/start', authMiddleware, requireJournalctlAdmin, startJournalctlLive);
+router.post('/journalctl/stop', authMiddleware, requireJournalctlAdmin, stopJournalctlLive);
+
 router.get('/journalctl/follow/status', authMiddleware, requireJournalctlAdmin, getJournalctlLiveStatus);
 router.post('/journalctl/follow/start', authMiddleware, requireJournalctlAdmin, startJournalctlLive);
 router.post('/journalctl/follow/stop', authMiddleware, requireJournalctlAdmin, stopJournalctlLive);

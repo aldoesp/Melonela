@@ -1,15 +1,15 @@
 const {
-  getJournalctlFollowStatus,
-  startJournalctlFollow,
-  stopJournalctlFollow,
-} = require('../services/journalctlCollectorService');
-const { normalizeJournalctlLog } = require('../services/logNormalizerService');
+  getJournalctlStreamStatus,
+  startJournalctlStream,
+  stopJournalctlStream,
+} = require('../services/journalctlRealtimeService');
+const { parseJournalctlLog } = require('../services/parserFactory');
 const { validateMelonelaLog } = require('../services/schemaValidationService');
 const { insertSystemEventLog } = require('../services/auditLogService');
 const { recordUserAction } = require('../services/userActionService');
 
 async function persistJournalctlLog(rawLog) {
-  const normalized = normalizeJournalctlLog(rawLog);
+  const normalized = parseJournalctlLog(rawLog);
   const validation = validateMelonelaLog(normalized);
 
   if (!validation.valid) {
@@ -23,7 +23,7 @@ async function persistJournalctlLog(rawLog) {
 
 async function startJournalctlLive(req, res, next) {
   try {
-    const result = startJournalctlFollow({
+    const result = startJournalctlStream({
       onLog: persistJournalctlLog,
       onError: (error) => {
         console.error('Erreur journalctl -f:', error.message);
@@ -39,9 +39,7 @@ async function startJournalctlLive(req, res, next) {
     });
 
     res.status(result.started ? 201 : 200).json({
-      message: result.started
-        ? 'Suivi journalctl -f démarré'
-        : 'Suivi journalctl -f déjà actif',
+      message: result.started ? 'Suivi journalctl -f démarré' : result.message,
       ...result,
     });
   } catch (error) {
@@ -51,7 +49,7 @@ async function startJournalctlLive(req, res, next) {
 
 async function stopJournalctlLive(req, res, next) {
   try {
-    const result = stopJournalctlFollow();
+    const result = stopJournalctlStream();
 
     await recordUserAction({
       user: req.user,
@@ -73,7 +71,7 @@ async function stopJournalctlLive(req, res, next) {
 }
 
 function getJournalctlLiveStatus(req, res) {
-  res.json(getJournalctlFollowStatus());
+  res.json(getJournalctlStreamStatus());
 }
 
 module.exports = {
