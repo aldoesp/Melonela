@@ -57,21 +57,21 @@ const SEV: Record<Severity, { pill: string; text: string; dot: string }> = {
 };
 
 const NAV_ITEMS: { id: NavId; icon: React.ElementType; label: string }[] = [
-  { id: "dashboard",  icon: LayoutDashboard, label: "Tableau de bord"  },
-  { id: "live",       icon: Activity,        label: "Historique Live"  },
-  { id: "rapports",   icon: FileText,        label: "Rapports"         },
-  { id: "sessions",   icon: History,         label: "Journal d'actions"},
-  { id: "administration", icon: UserCog,     label: "Administration"   },
-  { id: "parametres", icon: Settings,        label: "Paramètres"       },
+  { id: "dashboard",  icon: LayoutDashboard, label: "Security Overview" },
+  { id: "live",       icon: Activity,        label: "Event Stream"      },
+  { id: "rapports",   icon: FileText,        label: "Reports"           },
+  { id: "sessions",   icon: History,         label: "User Audit"        },
+  { id: "administration", icon: UserCog,     label: "Administration"    },
+  { id: "parametres", icon: Settings,        label: "Control Plane"     },
 ];
 
 const NAV_LABELS: Record<NavId, string> = {
-  dashboard: "Tableau de bord",
-  live: "Historique Live",
+  dashboard: "Security Overview",
+  live: "Event Stream",
   rapports: "Rapports",
   parametres: "Paramètres",
   profil: "Mon Profil",
-  sessions: "Journal d'actions",
+  sessions: "User Audit",
   ssh: "Sécurité & Clés SSH",
   administration: "Administration",
 };
@@ -278,23 +278,26 @@ function Shell({
     <div className="h-screen w-screen flex overflow-hidden bg-background text-foreground" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
 
       {/* Sidebar */}
-      <aside className="hidden w-60 flex-shrink-0 flex-col border-r border-border bg-[#0d0d10] md:flex">
-        <div className="flex items-center gap-2.5 px-5 py-4 border-b border-border">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center flex-shrink-0">
-            <Shield size={15} className="text-white" />
+      <aside className="hidden w-64 flex-shrink-0 flex-col border-r border-cyan-300/10 bg-[#070d11] md:flex">
+        <div className="flex items-center gap-3 border-b border-cyan-300/10 px-5 py-4">
+          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-cyan-300/25 bg-cyan-300/10 shadow-[0_0_28px_rgba(57,208,200,0.08)]">
+            <Shield size={16} className="text-cyan-200" />
           </div>
-          <span className="text-sm font-bold tracking-wide">Melonela</span>
-          <span className="ml-auto text-[9px] font-mono bg-blue-600/20 text-blue-400 px-1.5 py-0.5 rounded">SIEM</span>
+          <div className="min-w-0">
+            <span className="block text-sm font-bold tracking-wide text-slate-50">Melonela</span>
+            <span className="block text-[10px] font-mono uppercase tracking-widest text-slate-500">SOC command layer</span>
+          </div>
+          <span className="ml-auto rounded border border-cyan-300/20 bg-cyan-300/10 px-1.5 py-0.5 font-mono text-[9px] text-cyan-200">SIEM</span>
         </div>
-        <nav className="flex-1 px-3 py-4 space-y-0.5">
+        <nav className="flex-1 space-y-1 px-3 py-4">
           {navItems.map(({ id, icon: Icon, label }) => {
             const on = active === id;
             return (
               <button key={id} onClick={() => onNav(id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-150 ${on ? "bg-blue-600/15 text-blue-400 font-medium" : "text-zinc-500 hover:text-zinc-200 hover:bg-white/5"}`}>
+                className={`w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-150 ${on ? "bg-cyan-300/10 text-cyan-100 font-medium shadow-[inset_2px_0_0_rgba(57,208,200,0.7)]" : "text-slate-500 hover:bg-white/[0.045] hover:text-slate-200"}`}>
                 <Icon size={15} />
                 {label}
-                {on && <ChevronRight size={11} className="ml-auto text-blue-500" />}
+                {on && <ChevronRight size={11} className="ml-auto text-cyan-200" />}
               </button>
             );
           })}
@@ -322,7 +325,7 @@ function Shell({
                         setProfileMenuOpen(false);
                       }
                     }}
-                    className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs font-medium text-zinc-400 transition hover:bg-blue-500/[0.08] hover:text-zinc-100 hover:shadow-[inset_2px_0_0_rgba(59,130,246,0.45)]"
+                    className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs font-medium text-zinc-400 transition hover:bg-cyan-400/[0.08] hover:text-zinc-100 hover:shadow-[inset_2px_0_0_rgba(59,130,246,0.45)]"
                   >
                     <Icon size={14} className="text-zinc-500" />
                     <span>{label}</span>
@@ -354,7 +357,7 @@ function Shell({
             aria-expanded={profileMenuOpen}
             aria-haspopup="menu"
           >
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-xs font-bold text-white flex-shrink-0">{initials}</div>
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-300 to-teal-700 flex items-center justify-center text-xs font-bold text-slate-950 flex-shrink-0">{initials}</div>
             <div className="min-w-0">
               <p className="truncate text-xs font-semibold text-zinc-100">{username}</p>
               <p className="truncate text-[10px] text-zinc-500">{role}</p>
@@ -371,17 +374,20 @@ function Shell({
 
       {/* Main column */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="flex-shrink-0 flex flex-wrap items-center gap-3 px-4 py-3 border-b border-border bg-[#0a0a0d] md:flex-nowrap md:gap-4 md:px-6">
-          <h1 className="text-sm font-bold whitespace-nowrap">Dashboard Audit Système</h1>
+        <header className="flex-shrink-0 flex flex-wrap items-center gap-3 border-b border-cyan-300/10 bg-[#081014] px-4 py-3 md:flex-nowrap md:gap-4 md:px-6">
+          <div className="min-w-0">
+            <h1 className="whitespace-nowrap text-sm font-bold text-slate-50">Security Overview</h1>
+            <p className="hidden text-[10px] font-mono uppercase tracking-widest text-slate-600 sm:block">Live telemetry and operational audit</p>
+          </div>
           <div className="order-3 w-full flex-1 relative md:order-none md:max-w-lg">
             <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
             <input type="text" placeholder="Rechercher une IP, un utilisateur, un service..."
-              className="w-full bg-muted border border-border rounded-lg pl-8 pr-4 py-2 text-xs placeholder:text-zinc-600 focus:outline-none focus:border-blue-600/50 focus:ring-1 focus:ring-blue-600/30 transition-all" />
+              className="w-full bg-muted border border-border rounded-lg pl-8 pr-4 py-2 text-xs placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 transition-all" />
           </div>
           <div className="ml-auto flex items-center gap-4">
-            <div className="hidden items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-3 py-1.5 lg:flex">
+            <div className="hidden items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-1.5 lg:flex">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-[11px] font-medium text-emerald-400 whitespace-nowrap">Serveur Central: En Ligne</span>
+              <span className="text-[11px] font-medium text-emerald-400 whitespace-nowrap">Ingestion node: online</span>
             </div>
             <button className="relative text-zinc-500 hover:text-zinc-200 transition-colors">
               <Bell size={17} />
@@ -399,7 +405,7 @@ function Shell({
             </button>
           </div>
         </header>
-        <nav className="flex flex-shrink-0 gap-2 overflow-x-auto border-b border-border bg-[#0d0d10] px-3 py-2 md:hidden">
+        <nav className="flex flex-shrink-0 gap-2 overflow-x-auto border-b border-cyan-300/10 bg-[#071014] px-3 py-2 md:hidden">
           {navItems.map(({ id, icon: Icon, label }) => {
             const on = active === id;
             return (
@@ -407,7 +413,7 @@ function Shell({
                 key={id}
                 onClick={() => onNav(id)}
                 className={`flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-xs transition ${
-                  on ? "bg-blue-600/15 text-blue-300" : "text-zinc-500"
+                  on ? "bg-cyan-500/15 text-cyan-200" : "text-zinc-500"
                 }`}
               >
                 <Icon size={13} />
@@ -448,10 +454,10 @@ function DashboardView({
   return (
     <main className="flex-1 overflow-y-auto px-6 py-5 space-y-4" style={{ scrollbarWidth: "none" } as React.CSSProperties}>
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard title="Logs chargés" value={String(total)} icon={BarChart2} bg="bg-blue-600" sub="Source PostgreSQL" />
-        <KpiCard title="Avertissements" value={String(warningCount)} icon={XCircle} bg="bg-amber-500" vc="text-amber-400" sub="Sévérité medium" />
-        <KpiCard title="Événements critiques" value={String(criticalCount)} icon={AlertTriangle} bg="bg-red-600" vc="text-red-400" sub="High ou critical" />
-        <KpiCard title="Sources actives" value={String(activeSources)} icon={Server} bg="bg-zinc-600" sub="Dans la page courante" />
+        <KpiCard title="Événements ingérés" value={String(total)} icon={BarChart2} bg="bg-cyan-500" sub="Fenêtre active PostgreSQL" />
+        <KpiCard title="Signaux High" value={String(warningCount)} icon={XCircle} bg="bg-amber-500" vc="text-amber-400" sub="Sévérité medium" />
+        <KpiCard title="Critiques SOC" value={String(criticalCount)} icon={AlertTriangle} bg="bg-red-600" vc="text-red-400" sub="High ou critical" />
+        <KpiCard title="Sources observées" value={String(activeSources)} icon={Server} bg="bg-slate-600" sub="Machines et services" />
       </section>
 
       {error && (
@@ -547,8 +553,8 @@ function DashboardView({
       <section className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
           <div className="flex items-center gap-2">
-            <Activity size={14} className="text-blue-400" />
-            <h2 className="text-sm font-semibold">Historique système (Temps Réel)</h2>
+            <Activity size={14} className="text-cyan-300" />
+            <h2 className="text-sm font-semibold">Event Stream système</h2>
             {playing && <><span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse ml-2" /><span className="text-[10px] font-mono text-red-400 font-semibold">LIVE</span></>}
           </div>
           <div className="flex items-center gap-2">
@@ -558,9 +564,9 @@ function DashboardView({
             </button>
             <button
               onClick={() => void trackUserAction("REPORT_EXPORTED", "Dashboard audit", { source: "dashboard-summary" })}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600/10 border border-blue-600/25 text-blue-400 hover:bg-blue-600/20 transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-500/10 border border-cyan-500/25 text-cyan-300 hover:bg-cyan-500/20 transition-all"
             >
-              <Download size={11} />Exporter (CSV/PDF)
+              <Download size={11} />Exporter
             </button>
           </div>
         </div>
@@ -584,7 +590,7 @@ function DashboardView({
             return (
             <div key={log.id}>
               <button onClick={() => setExpanded((p) => p === log.id ? null : log.id)}
-                className={`w-full grid gap-2 px-5 py-2.5 text-left text-xs border-b border-border/40 transition-colors group ${idx % 2 === 0 ? "bg-card" : "bg-muted/10"} hover:bg-blue-600/5`}
+                className={`w-full grid gap-2 px-5 py-2.5 text-left text-xs border-b border-border/40 transition-colors group ${idx % 2 === 0 ? "bg-card" : "bg-muted/10"} hover:bg-cyan-500/5`}
                 style={{ gridTemplateColumns: "90px 155px 115px 1fr 145px 125px 32px" }}>
                 <span className="font-mono text-zinc-500 tabular-nums text-[11px]">{formatTime(log.eventTimestamp)}</span>
                 <span className="text-zinc-400 truncate font-mono text-[11px]">{log.service ?? log.eventType}</span>
@@ -593,7 +599,7 @@ function DashboardView({
                 <span><Badge level={severity} /></span>
                 <span className="font-mono text-zinc-500 text-[11px] truncate">{log.command ?? "-"}</span>
                 <span className="flex items-center justify-center">
-                  <ChevronDown size={13} className={`text-zinc-500 group-hover:text-zinc-400 transition-transform duration-200 ${expanded === log.id ? "rotate-180 text-blue-400" : ""}`} />
+                  <ChevronDown size={13} className={`text-zinc-500 group-hover:text-zinc-400 transition-transform duration-200 ${expanded === log.id ? "rotate-180 text-cyan-300" : ""}`} />
                 </span>
               </button>
               <div className="overflow-hidden transition-all duration-300" style={{ maxHeight: expanded === log.id ? "200px" : "0px" }}>
@@ -695,10 +701,10 @@ function HistoriqueLiveView({
       {/* ── Title + controls ── */}
       <div className="flex items-center gap-3 flex-wrap flex-shrink-0">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-blue-600/20 border border-blue-600/30 flex items-center justify-center">
-            <Terminal size={14} className="text-blue-400" />
+          <div className="w-7 h-7 rounded-lg bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center">
+            <Terminal size={14} className="text-cyan-300" />
           </div>
-          <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Flux d'Audit en Temps Réel</h2>
+          <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Event Stream temps réel</h2>
         </div>
 
         <div className="w-px h-5 bg-border flex-shrink-0" />
@@ -724,7 +730,7 @@ function HistoriqueLiveView({
         {/* Vider */}
         <button onClick={onClear}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 transition-all">
-          <Trash2 size={12} />Vider l'écran
+          <Trash2 size={12} />Nettoyer la vue
         </button>
 
         <div className="ml-auto flex items-center gap-2">
@@ -738,9 +744,9 @@ function HistoriqueLiveView({
           </button>
           <button
             onClick={() => void trackUserAction("REPORT_EXPORTED", "Historique Live", { source: "live-feed" })}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600/10 border border-blue-600/25 text-blue-400 hover:bg-blue-600/20 transition-all"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-500/10 border border-cyan-500/25 text-cyan-300 hover:bg-cyan-500/20 transition-all"
           >
-            <Download size={12} />Exporter le rapport
+            <Download size={12} />Exporter
           </button>
         </div>
       </div>
@@ -752,13 +758,13 @@ function HistoriqueLiveView({
 
         <div className="relative min-w-0 flex-1 max-w-[220px]">
           <input value={search} onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-blue-600/50"
+            className="w-full bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/50"
             placeholder="Recherche texte" />
         </div>
 
         <div className="relative min-w-0 flex-1 max-w-[150px]">
           <select value={severity} onChange={(e) => setSeverity(e.target.value)}
-            className="w-full appearance-none bg-muted border border-border rounded-lg pl-3 pr-7 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-600/50 cursor-pointer">
+            className="w-full appearance-none bg-muted border border-border rounded-lg pl-3 pr-7 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500/50 cursor-pointer">
             <option value="">Toutes sévérités</option>
             <option value="low">Low</option>
             <option value="medium">Medium</option>
@@ -770,7 +776,7 @@ function HistoriqueLiveView({
 
         <div className="relative min-w-0 flex-1 max-w-[180px]">
           <select value={eventType} onChange={(e) => setEventType(e.target.value)}
-            className="w-full appearance-none bg-muted border border-border rounded-lg pl-3 pr-7 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-600/50 cursor-pointer">
+            className="w-full appearance-none bg-muted border border-border rounded-lg pl-3 pr-7 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500/50 cursor-pointer">
             <option value="">Tous les types</option>
             {EVENT_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
@@ -778,25 +784,25 @@ function HistoriqueLiveView({
         </div>
 
         <input value={service} onChange={(e) => setService(e.target.value)}
-          className="w-28 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-blue-600/50"
+          className="w-28 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/50"
           placeholder="Service" />
 
         <input value={username} onChange={(e) => setUsername(e.target.value)}
-          className="w-28 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-blue-600/50"
+          className="w-28 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/50"
           placeholder="Utilisateur" />
 
         <input value={command} onChange={(e) => setCommand(e.target.value)}
-          className="w-36 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-blue-600/50"
+          className="w-36 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/50"
           placeholder="Commande" />
 
         <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-          className="bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-600/50 [color-scheme:dark]" />
+          className="bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500/50 [color-scheme:dark]" />
 
         <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-          className="bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-600/50 [color-scheme:dark]" />
+          className="bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500/50 [color-scheme:dark]" />
 
         <button onClick={applyFilters}
-          className="rounded-lg border border-blue-600/25 bg-blue-600/10 px-3 py-1.5 text-xs font-medium text-blue-400 hover:bg-blue-600/20">
+          className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-300 hover:bg-cyan-500/20">
           Appliquer
         </button>
 
@@ -856,14 +862,14 @@ function HistoriqueLiveView({
             const isNew  = idx === 0 && playing;
             const severity = severityForLog(log);
             return (
-              <div key={log.id} className={isOpen ? "border-l-2 border-blue-500/50" : "border-l-2 border-transparent"}>
+              <div key={log.id} className={isOpen ? "border-l-2 border-cyan-400/50" : "border-l-2 border-transparent"}>
 
                 {/* Row */}
                 <button
                   onClick={() => setExpanded((p) => p === log.id ? null : log.id)}
                   className={`w-full grid gap-2 px-4 py-[8px] text-left text-xs border-b border-border/30 transition-colors duration-75 group relative
                     ${idx % 2 === 0 ? "bg-card" : "bg-[#0f0f12]"}
-                    ${isOpen ? "bg-blue-600/[0.04]" : "hover:bg-blue-500/[0.06] hover:shadow-[inset_2px_0_0_rgba(59,130,246,0.45)]"}`}
+                    ${isOpen ? "bg-cyan-500/[0.04]" : "hover:bg-cyan-400/[0.06] hover:shadow-[inset_2px_0_0_rgba(59,130,246,0.45)]"}`}
                   style={{ gridTemplateColumns: COL }}
                 >
                   {isNew && <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-emerald-400/70 animate-pulse" />}
@@ -882,7 +888,7 @@ function HistoriqueLiveView({
                   </span>
                   <span className="font-mono text-[11px] text-zinc-500 self-center">{log.targetUser ?? "-"}</span>
                   <span className="flex items-center justify-center self-center">
-                    <ChevronDown size={13} className={`text-zinc-500 group-hover:text-zinc-400 transition-transform duration-200 ${isOpen ? "rotate-180 text-blue-400" : ""}`} />
+                    <ChevronDown size={13} className={`text-zinc-500 group-hover:text-zinc-400 transition-transform duration-200 ${isOpen ? "rotate-180 text-cyan-300" : ""}`} />
                   </span>
                 </button>
 
@@ -1032,12 +1038,12 @@ interface Report {
 const FORMAT_ICON_COLOR: Record<ReportFormat, { icon: string; bg: string; text: string }> = {
   PDF:  { icon: "PDF",  bg: "bg-red-500/10  border-red-500/20",  text: "text-red-400"   },
   CSV:  { icon: "CSV",  bg: "bg-emerald-500/10 border-emerald-500/20", text: "text-emerald-400" },
-  JSON: { icon: "JSON", bg: "bg-blue-500/10  border-blue-500/20",  text: "text-blue-400"  },
+  JSON: { icon: "JSON", bg: "bg-cyan-400/10  border-cyan-400/20",  text: "text-cyan-300"  },
 };
 
 const STATUS_STYLE: Record<ReportStatus, { pill: string; dot: string; label: string }> = {
   "Prêt":     { pill: "bg-emerald-500/10 text-emerald-400 border-emerald-500/25", dot: "bg-emerald-400", label: "Prêt" },
-  "En cours": { pill: "bg-blue-500/10    text-blue-400    border-blue-500/25",    dot: "bg-blue-400",    label: "En cours" },
+  "En cours": { pill: "bg-cyan-400/10    text-cyan-300    border-cyan-400/25",    dot: "bg-cyan-300",    label: "En cours" },
   "Échec":    { pill: "bg-red-500/10     text-red-400     border-red-500/25",     dot: "bg-red-500",     label: "Échec" },
 };
 
@@ -1060,8 +1066,8 @@ function ReportSortButton({
     <button onClick={() => onSort(field)} className="flex items-center gap-1 group hover:text-zinc-300 transition-colors">
       {label}
       <span className="flex flex-col opacity-40 group-hover:opacity-80">
-        <ChevronUp size={8} className={sortField === field && sortAsc ? "opacity-100 text-blue-400" : ""} />
-        <ChevronDown size={8} className={sortField === field && !sortAsc ? "opacity-100 text-blue-400" : ""} style={{ marginTop: -2 }} />
+        <ChevronUp size={8} className={sortField === field && sortAsc ? "opacity-100 text-cyan-300" : ""} />
+        <ChevronDown size={8} className={sortField === field && !sortAsc ? "opacity-100 text-cyan-300" : ""} style={{ marginTop: -2 }} />
       </span>
     </button>
   );
@@ -1163,7 +1169,7 @@ function RapportsView() {
             <button key={s} onClick={() => setFilterStatus(s)}
               className={`px-3 py-1 rounded-full text-[11px] font-medium border transition-all ${
                 filterStatus === s
-                  ? "bg-blue-600/20 border-blue-600/40 text-blue-300"
+                  ? "bg-cyan-500/20 border-cyan-500/40 text-cyan-200"
                   : "border-zinc-800 text-zinc-600 hover:text-zinc-300 hover:border-zinc-700"
               }`}>
               {s}
@@ -1199,7 +1205,7 @@ function RapportsView() {
                   type="text"
                   value={reportName}
                   onChange={(e) => setReportName(e.target.value)}
-                  className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs font-mono text-foreground placeholder:text-zinc-500 focus:outline-none focus:border-blue-600/50 focus:ring-1 focus:ring-blue-600/30 transition-all"
+                  className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs font-mono text-foreground placeholder:text-zinc-500 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 transition-all"
                   placeholder="rapport_audit_..."
                 />
               </div>
@@ -1213,12 +1219,12 @@ function RapportsView() {
                   <div>
                     <p className="text-[10px] text-zinc-500 mb-1 font-mono">Du</p>
                     <input type="date" value={dateDebut} onChange={(e) => setDateDebut(e.target.value)}
-                      className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs font-mono text-zinc-300 focus:outline-none focus:border-blue-600/50 focus:ring-1 focus:ring-blue-600/30 transition-all [color-scheme:dark]" />
+                      className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs font-mono text-zinc-300 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 transition-all [color-scheme:dark]" />
                   </div>
                   <div>
                     <p className="text-[10px] text-zinc-500 mb-1 font-mono">Au</p>
                     <input type="date" value={dateFin} onChange={(e) => setDateFin(e.target.value)}
-                      className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs font-mono text-zinc-300 focus:outline-none focus:border-blue-600/50 focus:ring-1 focus:ring-blue-600/30 transition-all [color-scheme:dark]" />
+                      className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs font-mono text-zinc-300 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 transition-all [color-scheme:dark]" />
                   </div>
                 </div>
               </div>
@@ -1228,7 +1234,7 @@ function RapportsView() {
                 <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest block mb-2">Service ciblé</label>
                 <div className="relative">
                   <select value={selService} onChange={(e) => setSelService(e.target.value)}
-                    className="w-full appearance-none bg-muted border border-border rounded-lg pl-3 pr-7 py-2 text-xs text-zinc-300 focus:outline-none focus:border-blue-600/50 cursor-pointer">
+                    className="w-full appearance-none bg-muted border border-border rounded-lg pl-3 pr-7 py-2 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500/50 cursor-pointer">
                     {SERVICES_LIST.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                   <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
@@ -1313,7 +1319,7 @@ function RapportsView() {
                   generated
                     ? "bg-emerald-600/20 border border-emerald-600/40 text-emerald-400 cursor-default"
                     : generating
-                    ? "bg-blue-600/20 border border-blue-600/30 text-blue-400 cursor-wait"
+                    ? "bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 cursor-wait"
                     : "bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-500 shadow-lg shadow-indigo-900/30 active:scale-[0.98]"
                 }`}
               >
@@ -1479,7 +1485,7 @@ function RapportsView() {
                 <CheckCircle2 size={10} />{readyCnt} prêt{readyCnt > 1 ? "s" : ""}
               </span>
               <span className="text-zinc-800">·</span>
-              <span className={`flex items-center gap-1.5 text-[10px] font-mono ${pendingCnt > 0 ? "text-blue-600" : "text-zinc-500"}`}>
+              <span className={`flex items-center gap-1.5 text-[10px] font-mono ${pendingCnt > 0 ? "text-cyan-500" : "text-zinc-500"}`}>
                 <Loader2 size={10} />{pendingCnt} en cours
               </span>
               <span className="text-zinc-800">·</span>
@@ -1594,8 +1600,8 @@ function ProfilView() {
     >
       <div className="mb-5 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-blue-600/30 bg-blue-600/20">
-            <UserCog size={15} className="text-blue-400" />
+          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-cyan-500/30 bg-cyan-500/20">
+            <UserCog size={15} className="text-cyan-300" />
           </div>
           <div>
             <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Mon Profil</h2>
@@ -1625,7 +1631,7 @@ function ProfilView() {
       <div className="grid gap-5 xl:grid-cols-[minmax(0,0.92fr)_minmax(360px,0.68fr)]">
         <section className="rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
           <div className="flex items-center gap-2.5 border-b border-border bg-[#0d0d10] px-5 py-3.5">
-            <ShieldCheck size={15} className="text-blue-400" />
+            <ShieldCheck size={15} className="text-cyan-300" />
             <h3 className="text-sm font-semibold">Informations Générales</h3>
           </div>
 
@@ -1648,15 +1654,15 @@ function ProfilView() {
                     type={key === "email" ? "email" : "text"}
                     value={profileForm[key]}
                     onChange={(event) => setProfileForm((current) => ({ ...current, [key]: event.target.value }))}
-                    className="w-full rounded-lg border border-border bg-muted px-3 py-3 text-xs text-zinc-200 outline-none transition focus:border-blue-500/45 focus:ring-1 focus:ring-blue-500/25"
+                    className="w-full rounded-lg border border-border bg-muted px-3 py-3 text-xs text-zinc-200 outline-none transition focus:border-cyan-400/45 focus:ring-1 focus:ring-cyan-400/25"
                   />
                 </label>
               ))}
             </div>
 
-            <div className="rounded-lg border border-blue-600/20 bg-blue-600/5 px-4 py-3">
+            <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-4 py-3">
               <div className="flex items-center gap-2.5">
-                <CalendarDays size={14} className="text-blue-400" />
+                <CalendarDays size={14} className="text-cyan-300" />
                 <p className="text-xs font-medium text-zinc-300">
                   Membre depuis {profile?.createdAt ? new Date(profile.createdAt).toLocaleDateString("fr-FR") : "-"} · Dernière connexion {profile?.lastLoginAt ? new Date(profile.lastLoginAt).toLocaleString("fr-FR") : "jamais"}
                 </p>
@@ -1666,7 +1672,7 @@ function ProfilView() {
             <button
               type="submit"
               disabled={saving}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-sm font-semibold text-blue-300 transition hover:bg-blue-500/20 disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-400/20 disabled:opacity-60"
             >
               {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
               Enregistrer le profil
@@ -1779,8 +1785,8 @@ function SessionsView() {
     >
       <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-blue-600/30 bg-blue-600/20">
-            <History size={15} className="text-blue-400" />
+          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-cyan-500/30 bg-cyan-500/20">
+            <History size={15} className="text-cyan-300" />
           </div>
           <div>
             <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Journal de mes actions</h2>
@@ -1793,7 +1799,7 @@ function SessionsView() {
         <button
           type="button"
           onClick={() => void loadActions()}
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-600/25 bg-blue-600/10 px-3 py-2 text-xs font-semibold text-blue-400 transition hover:bg-blue-600/20"
+          className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-500/20"
         >
           <RotateCw size={14} className={loading ? "animate-spin" : ""} />
           Rafraîchir
@@ -1803,7 +1809,7 @@ function SessionsView() {
       <section className="overflow-hidden rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
         <div className="flex items-center justify-between border-b border-border bg-[#0d0d10] px-5 py-3.5">
           <div className="flex items-center gap-2.5">
-            <ShieldCheck size={15} className="text-blue-400" />
+            <ShieldCheck size={15} className="text-cyan-300" />
             <h3 className="text-sm font-semibold">Historique des actions utilisateur</h3>
           </div>
           <span className="rounded-full bg-zinc-800/70 px-2.5 py-1 text-[10px] font-mono font-semibold text-zinc-500">
@@ -1843,7 +1849,7 @@ function SessionsView() {
               return (
                 <div
                   key={action.id}
-                  className="grid gap-3 px-5 py-4 text-xs transition hover:bg-blue-500/[0.06] hover:shadow-[inset_2px_0_0_rgba(59,130,246,0.45)] md:grid-cols-[175px_190px_1fr_150px_1fr] md:items-center md:gap-4"
+                  className="grid gap-3 px-5 py-4 text-xs transition hover:bg-cyan-400/[0.06] hover:shadow-[inset_2px_0_0_rgba(59,130,246,0.45)] md:grid-cols-[175px_190px_1fr_150px_1fr] md:items-center md:gap-4"
                 >
                   <div>
                     <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 md:hidden">
@@ -1963,8 +1969,8 @@ function AdministrationView() {
     <main className="flex-1 overflow-y-auto px-4 py-5 md:px-6" style={{ scrollbarWidth: "none" } as React.CSSProperties}>
       <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-blue-600/30 bg-blue-600/20">
-            <UserCog size={15} className="text-blue-400" />
+          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-cyan-500/30 bg-cyan-500/20">
+            <UserCog size={15} className="text-cyan-300" />
           </div>
           <div>
             <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Administration</h2>
@@ -1980,7 +1986,7 @@ function AdministrationView() {
               href={exportUrl(format)}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-2 rounded-lg border border-blue-600/25 bg-blue-600/10 px-3 py-2 text-xs font-semibold text-blue-400 hover:bg-blue-600/20"
+              className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/20"
             >
               <Download size={13} />
               Export {format.toUpperCase()}
@@ -2015,7 +2021,7 @@ function AdministrationView() {
             </select>
             <button
               onClick={() => void loadUsers(1)}
-              className="rounded-lg border border-blue-600/25 bg-blue-600/10 px-3 py-2 text-xs font-semibold text-blue-400"
+              className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-300"
             >
               Filtrer
             </button>
@@ -2137,8 +2143,8 @@ function SshSecurityView() {
     >
       <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-blue-600/30 bg-blue-600/20">
-            <ShieldCheck size={15} className="text-blue-400" />
+          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-cyan-500/30 bg-cyan-500/20">
+            <ShieldCheck size={15} className="text-cyan-300" />
           </div>
           <div>
             <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Sécurité & Clés SSH</h2>
@@ -2159,7 +2165,7 @@ function SshSecurityView() {
           <div className="overflow-hidden rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
             <div className="flex items-center justify-between border-b border-border bg-[#0d0d10] px-5 py-3.5">
               <div className="flex items-center gap-2.5">
-                <KeyRound size={15} className="text-blue-400" />
+                <KeyRound size={15} className="text-cyan-300" />
                 <h3 className="text-sm font-semibold">Clés SSH Autorisées</h3>
               </div>
               <span className="rounded-full bg-zinc-800/70 px-2.5 py-1 text-[10px] font-mono font-semibold text-zinc-500">
@@ -2171,12 +2177,12 @@ function SshSecurityView() {
               {SSH_KEYS.map((key) => (
                 <div
                   key={key.fingerprint}
-                  className="grid gap-3 px-5 py-4 transition hover:bg-blue-500/[0.06] hover:shadow-[inset_2px_0_0_rgba(59,130,246,0.45)] md:grid-cols-[minmax(0,1fr)_170px_110px] md:items-center"
+                  className="grid gap-3 px-5 py-4 transition hover:bg-cyan-400/[0.06] hover:shadow-[inset_2px_0_0_rgba(59,130,246,0.45)] md:grid-cols-[minmax(0,1fr)_170px_110px] md:items-center"
                 >
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-blue-600/20 bg-blue-600/10">
-                        <KeyRound size={14} className="text-blue-400" />
+                      <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10">
+                        <KeyRound size={14} className="text-cyan-300" />
                       </span>
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-zinc-100">{key.name}</p>
@@ -2360,7 +2366,7 @@ function SecurityAccessSettings() {
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
       <section className="overflow-hidden rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
         <div className="flex items-center gap-2.5 border-b border-border bg-[#0d0d10] px-5 py-3.5">
-          <ShieldCheck size={15} className="text-blue-400" />
+          <ShieldCheck size={15} className="text-cyan-300" />
           <h3 className="text-sm font-semibold">Règles de sécurité administrateur</h3>
         </div>
         <div className="divide-y divide-border/40">
@@ -2372,7 +2378,7 @@ function SecurityAccessSettings() {
                 setEnabled((value) => !value);
                 void trackUserAction("SETTINGS_UPDATED", label, { area: "security-access", enabled: !enabled });
               }}
-              className="flex w-full items-center justify-between gap-5 px-5 py-4 text-left transition hover:bg-blue-500/[0.06] hover:shadow-[inset_2px_0_0_rgba(59,130,246,0.45)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+              className="flex w-full items-center justify-between gap-5 px-5 py-4 text-left transition hover:bg-cyan-400/[0.06] hover:shadow-[inset_2px_0_0_rgba(59,130,246,0.45)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/30"
               aria-pressed={enabled}
             >
               <span>
@@ -2403,7 +2409,7 @@ function SecurityAccessSettings() {
           {[
             ["Double validation", mfaRequired ? "Active" : "Inactive", mfaRequired ? "text-emerald-400" : "text-zinc-500"],
             ["Sessions courtes", shortSessions ? "Actives" : "Inactives", shortSessions ? "text-emerald-400" : "text-zinc-500"],
-            ["Audit profil", profileAudit ? "Actif" : "Inactif", profileAudit ? "text-blue-400" : "text-zinc-500"],
+            ["Audit profil", profileAudit ? "Actif" : "Inactif", profileAudit ? "text-cyan-300" : "text-zinc-500"],
           ].map(([label, value, color]) => (
             <div key={label} className="flex items-center justify-between gap-4">
               <span className="text-[11px] text-zinc-600">{label}</span>
@@ -2501,7 +2507,7 @@ function GeneralSettings() {
   return (
     <section className="overflow-hidden rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
       <div className="flex items-center gap-2.5 border-b border-border bg-[#0d0d10] px-5 py-3.5">
-        <Settings size={15} className="text-blue-400" />
+        <Settings size={15} className="text-cyan-300" />
         <h3 className="text-sm font-semibold">Préférences générales d'audit</h3>
       </div>
 
@@ -2516,7 +2522,7 @@ function GeneralSettings() {
               setRetentionDays(event.target.value);
               void trackUserAction("SETTINGS_UPDATED", "Conservation des logs", { value: event.target.value });
             }}
-            className="w-full appearance-none rounded-lg border border-border bg-muted px-3 py-3 text-xs text-zinc-200 outline-none transition focus:border-blue-500/45 focus:ring-1 focus:ring-blue-500/25"
+            className="w-full appearance-none rounded-lg border border-border bg-muted px-3 py-3 text-xs text-zinc-200 outline-none transition focus:border-cyan-400/45 focus:ring-1 focus:ring-cyan-400/25"
           >
             <option>30 jours</option>
             <option>90 jours</option>
@@ -2531,7 +2537,7 @@ function GeneralSettings() {
             setAutoRefresh((value) => !value);
             void trackUserAction("SETTINGS_UPDATED", "Actualisation automatique", { enabled: !autoRefresh });
           }}
-          className="flex items-center justify-between gap-4 rounded-lg border border-border bg-[#0d0d10] p-4 text-left transition hover:border-blue-500/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+          className="flex items-center justify-between gap-4 rounded-lg border border-border bg-[#0d0d10] p-4 text-left transition hover:border-cyan-400/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/30"
           aria-pressed={autoRefresh}
         >
           <span>
@@ -2540,12 +2546,12 @@ function GeneralSettings() {
           </span>
           <span
             className={`relative h-6 w-11 flex-shrink-0 rounded-full border transition ${
-              autoRefresh ? "border-blue-500/50 bg-blue-500/25" : "border-zinc-700 bg-zinc-900"
+              autoRefresh ? "border-cyan-400/50 bg-cyan-400/25" : "border-zinc-700 bg-zinc-900"
             }`}
           >
             <span
               className={`absolute top-1 h-4 w-4 rounded-full transition ${
-                autoRefresh ? "left-6 bg-blue-300 shadow-lg shadow-blue-500/25" : "left-1 bg-zinc-600"
+                autoRefresh ? "left-6 bg-cyan-200 shadow-lg shadow-cyan-400/25" : "left-1 bg-zinc-600"
               }`}
             />
           </span>
@@ -2566,8 +2572,8 @@ function ParametresView() {
     >
       <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-blue-600/30 bg-blue-600/20">
-            <Settings size={15} className="text-blue-400" />
+          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-cyan-500/30 bg-cyan-500/20">
+            <Settings size={15} className="text-cyan-300" />
           </div>
           <div>
             <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Configurations & Paramètres</h2>
@@ -2587,7 +2593,7 @@ function ParametresView() {
                 onClick={() => setActiveSettingsTab(tab)}
                 className={`rounded-md px-3 py-2 text-xs font-medium transition-all ${
                   active
-                    ? "bg-blue-600/20 text-blue-300 shadow-inner shadow-blue-950/40"
+                    ? "bg-cyan-500/20 text-cyan-200 shadow-inner shadow-cyan-950/40"
                     : "text-zinc-600 hover:bg-white/5 hover:text-zinc-300"
                 }`}
               >
@@ -2604,7 +2610,7 @@ function ParametresView() {
           <div className="overflow-hidden rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
             <div className="flex items-center justify-between border-b border-border bg-[#0d0d10] px-5 py-3.5">
               <div className="flex items-center gap-2.5">
-                <KeyRound size={15} className="text-blue-400" />
+                <KeyRound size={15} className="text-cyan-300" />
                 <h3 className="text-sm font-semibold">Clés d'API d'Ingestion</h3>
               </div>
               <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-mono font-semibold text-emerald-400">
@@ -2623,14 +2629,14 @@ function ParametresView() {
                       readOnly
                       type="text"
                       value={maskedToken}
-                      className="w-full rounded-lg border border-border bg-[#0b0d12] px-3 py-3 pr-11 font-mono text-xs text-zinc-200 outline-none ring-1 ring-inset ring-white/[0.03] transition selection:bg-amber-500/20 focus:border-blue-600/50 focus:ring-1 focus:ring-blue-600/30"
+                      className="w-full rounded-lg border border-border bg-[#0b0d12] px-3 py-3 pr-11 font-mono text-xs text-zinc-200 outline-none ring-1 ring-inset ring-white/[0.03] transition selection:bg-amber-500/20 focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30"
                     />
                     <Shield size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600" />
                   </div>
                   <button
                     type="button"
                     onClick={() => void trackUserAction("SETTINGS_UPDATED", "Token agent copié", { target: "agent-token" })}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-700 px-3 py-3 text-xs font-semibold text-zinc-300 transition hover:border-blue-500/50 hover:bg-blue-500/10 hover:text-blue-300"
+                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-700 px-3 py-3 text-xs font-semibold text-zinc-300 transition hover:border-cyan-400/50 hover:bg-cyan-400/10 hover:text-cyan-200"
                     title="Copier le token"
                   >
                     <Copy size={14} />
@@ -2661,7 +2667,7 @@ function ParametresView() {
                   Agents connectés au collecteur central
                 </p>
               </div>
-              <span className="rounded-full bg-blue-600/10 px-2.5 py-1 text-[10px] font-mono font-semibold text-blue-400">
+              <span className="rounded-full bg-cyan-500/10 px-2.5 py-1 text-[10px] font-mono font-semibold text-cyan-300">
                 3 machines
               </span>
             </div>
@@ -2679,8 +2685,8 @@ function ParametresView() {
                     }`}
                   >
                     <div className="mb-4 flex items-start justify-between gap-3">
-                      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-blue-600/20 bg-blue-600/10">
-                        <Icon size={17} className="text-blue-400" />
+                      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10">
+                        <Icon size={17} className="text-cyan-300" />
                       </div>
                       <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 px-2 py-1 text-[10px] font-mono text-zinc-400">
                         <span className={`h-1.5 w-1.5 rounded-full ${statusColor}`} />
@@ -2704,7 +2710,7 @@ function ParametresView() {
             <div className="mt-4 space-y-3">
               {[
                 ["Collecteur central", "Synchronisé", "text-emerald-400"],
-                ["File d'ingestion", "Stable", "text-blue-400"],
+                ["File d'ingestion", "Stable", "text-cyan-300"],
                 ["Agents hors ligne", "1 signalé", "text-zinc-500"],
               ].map(([label, value, color]) => (
                 <div key={label} className="flex items-center justify-between gap-4">

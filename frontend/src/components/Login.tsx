@@ -105,22 +105,29 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     setIsRightPanelActive((prev) => !prev);
   };
 
+  const telemetry = [
+    { label: 'Events/min', value: '1.8k', tone: 'text-cyan-300' },
+    { label: 'Agents', value: '42', tone: 'text-emerald-300' },
+    { label: 'High', value: '7', tone: 'text-amber-300' },
+  ];
+
   return (
-    <div className="relative flex min-h-screen flex-col items-center justify-center bg-transparent p-6 font-sans text-zinc-100 selection:bg-emerald-500/30">
+    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-[#05080a] p-4 font-sans text-slate-100 selection:bg-cyan-400/25 sm:p-6">
       {/* Grille de fond subtile façon SOC */}
       <div
         className="pointer-events-none fixed inset-0 z-0 opacity-20"
         style={{
           backgroundImage:
-            'radial-gradient(rgba(250,250,250,0.04) 1px, transparent 1px)',
-          backgroundSize: '32px 32px',
+            'linear-gradient(rgba(57,208,200,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(57,208,200,0.06) 1px, transparent 1px)',
+          backgroundSize: '44px 44px',
         }}
       />
+      <div className="pointer-events-none fixed inset-0 z-0 bg-[radial-gradient(circle_at_30%_18%,rgba(57,208,200,0.12),transparent_28%),radial-gradient(circle_at_72%_70%,rgba(125,211,252,0.09),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent_32%)]" />
 
       {/* Conteneur principal */}
-      <div className="z-10 flex w-full max-w-4xl flex-col items-center justify-center">
+      <div className="z-10 flex w-full max-w-5xl flex-col items-center justify-center">
         <div
-          className={`relative flex w-full overflow-hidden rounded-2xl border border-zinc-800 bg-[#18181b] shadow-2xl shadow-black/60 transition-all duration-700 ease-in-out ${
+          className={`relative flex w-full overflow-hidden rounded-xl border border-cyan-300/15 bg-[#071014]/95 shadow-2xl shadow-black/70 ring-1 ring-white/[0.04] backdrop-blur-xl transition-all duration-700 ease-in-out ${
             isRightPanelActive ? 'h-[520px] sm:h-[500px]' : 'h-[520px] sm:h-[500px]'
           }`}
         >
@@ -133,27 +140,27 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             }`}
           >
             <div className="flex w-full max-w-xs flex-col items-center">
-              <div className="mb-2 flex items-center justify-center rounded-full bg-emerald-500/10 p-3">
-                <Shield className="h-8 w-8 text-emerald-400" />
+              <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-xl border border-cyan-300/20 bg-cyan-300/10 shadow-[0_0_34px_rgba(57,208,200,0.12)]">
+                <Shield className="h-7 w-7 text-cyan-200" />
               </div>
-              <h2 className="text-2xl font-bold tracking-tight text-zinc-100">
-                Authentification
+              <h2 className="text-2xl font-bold tracking-tight text-slate-50">
+                Melonela Access
               </h2>
-              <p className="mt-1 text-center text-xs font-medium text-zinc-400">
-                Dashboard d'Audit Système & Sécurité
+              <p className="mt-1 text-center text-xs font-medium text-slate-400">
+                Console SIEM temps réel
               </p>
 
               <form onSubmit={handleSignIn} className="mt-6 w-full space-y-4">
                 <div className="relative">
                   <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                    <User className="h-4 w-4 text-zinc-500" />
+                    <User className="h-4 w-4 text-slate-500" />
                   </div>
                   <input
                     type="text"
                     placeholder="Identifiant ou Email"
                     value={signInIdentifier}
                     onChange={(e) => setSignInIdentifier(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2.5 pl-10 pr-4 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition focus:border-emerald-500 focus:bg-zinc-800/90"
+                    className="w-full rounded-lg border border-slate-700/80 bg-[#0d171d] py-2.5 pl-10 pr-4 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-cyan-300/70 focus:bg-[#101d24] focus:ring-2 focus:ring-cyan-300/10"
                     autoComplete="username"
                     required
                   />
@@ -161,21 +168,21 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
                 <div className="relative">
                   <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                    <Lock className="h-4 w-4 text-zinc-500" />
+                    <Lock className="h-4 w-4 text-slate-500" />
                   </div>
                   <input
                     type={showSignInPassword ? 'text' : 'password'}
                     placeholder="Mot de passe"
                     value={signInPassword}
                     onChange={(e) => setSignInPassword(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2.5 pl-10 pr-12 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition focus:border-emerald-500 focus:bg-zinc-800/90"
+                    className="w-full rounded-lg border border-slate-700/80 bg-[#0d171d] py-2.5 pl-10 pr-12 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-cyan-300/70 focus:bg-[#101d24] focus:ring-2 focus:ring-cyan-300/10"
                     autoComplete="current-password"
                     required
                   />
                   <button
                     type="button"
                     onClick={() => setShowSignInPassword((prev) => !prev)}
-                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-zinc-500 hover:text-zinc-300"
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-500 transition hover:text-cyan-200"
                     aria-label={showSignInPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
                   >
                     {showSignInPassword ? (
@@ -189,20 +196,20 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                 <div className="text-right">
                   <a
                     href="#"
-                    className="text-xs font-medium text-zinc-500 hover:text-emerald-400 transition"
+                    className="text-xs font-medium text-slate-500 transition hover:text-cyan-200"
                   >
                     Mot de passe oublié ?
                   </a>
                 </div>
 
                 {signInError && (
-                  <p className="text-sm text-red-400 text-center">{signInError}</p>
+                  <p className="rounded-lg border border-red-400/20 bg-red-500/10 px-3 py-2 text-center text-xs text-red-200">{signInError}</p>
                 )}
 
                 <button
                   type="submit"
                   disabled={isSignInSubmitting}
-                  className="flex w-full items-center justify-center gap-2 rounded-full bg-emerald-600 py-2.5 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-emerald-600/30 transition hover:bg-emerald-500 hover:shadow-emerald-500/40 border border-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-200/20 bg-cyan-300/15 py-2.5 text-sm font-bold uppercase tracking-wider text-cyan-50 shadow-lg shadow-cyan-950/30 transition hover:bg-cyan-300/22 hover:shadow-cyan-400/10 focus:outline-none focus:ring-2 focus:ring-cyan-300/25 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isSignInSubmitting ? 'Connexion...' : <><LogIn className="h-4 w-4" />
                   Connexion</>}
@@ -213,7 +220,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                 <button
                   type="button"
                   onClick={togglePanel}
-                  className="text-xs font-semibold uppercase tracking-[0.25em] text-emerald-400 transition hover:text-white"
+                  className="text-xs font-semibold uppercase tracking-[0.25em] text-cyan-200 transition hover:text-white"
                 >
                   Créer un compte
                 </button>
@@ -230,27 +237,27 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             }`}
           >
             <div className="flex w-full max-w-xs flex-col items-center">
-              <div className="mb-2 flex items-center justify-center rounded-full bg-emerald-500/10 p-3">
-                <Fingerprint className="h-8 w-8 text-emerald-400" />
+              <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-xl border border-cyan-300/20 bg-cyan-300/10 shadow-[0_0_34px_rgba(57,208,200,0.12)]">
+                <Fingerprint className="h-7 w-7 text-cyan-200" />
               </div>
-              <h2 className="text-2xl font-bold tracking-tight text-zinc-100">
-                Créer un Compte
+              <h2 className="text-2xl font-bold tracking-tight text-slate-50">
+                Nouvel analyste
               </h2>
-              <p className="mt-1 text-center text-xs font-medium text-zinc-400">
-                Réservé au personnel de l'équipe de sécurité
+              <p className="mt-1 text-center text-xs font-medium text-slate-400">
+                Enrôlement dans la console Melonela
               </p>
 
               <form onSubmit={handleSignUp} className="mt-6 w-full space-y-4">
                 <div className="relative">
                   <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                    <User className="h-4 w-4 text-zinc-500" />
+                    <User className="h-4 w-4 text-slate-500" />
                   </div>
                   <input
                     type="text"
                     placeholder="Nom d'utilisateur"
                     value={signUpUsername}
                     onChange={(e) => setSignUpUsername(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2.5 pl-10 pr-4 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition focus:border-emerald-500 focus:bg-zinc-800/90"
+                    className="w-full rounded-lg border border-slate-700/80 bg-[#0d171d] py-2.5 pl-10 pr-4 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-cyan-300/70 focus:bg-[#101d24] focus:ring-2 focus:ring-cyan-300/10"
                     autoComplete="username"
                     required
                   />
@@ -258,21 +265,21 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
                 <div className="relative">
                   <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                    <Lock className="h-4 w-4 text-zinc-500" />
+                    <Lock className="h-4 w-4 text-slate-500" />
                   </div>
                   <input
                     type={showSignUpPassword ? 'text' : 'password'}
                     placeholder="Mot de passe"
                     value={signUpPassword}
                     onChange={(e) => setSignUpPassword(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2.5 pl-10 pr-12 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition focus:border-emerald-500 focus:bg-zinc-800/90"
+                    className="w-full rounded-lg border border-slate-700/80 bg-[#0d171d] py-2.5 pl-10 pr-12 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-cyan-300/70 focus:bg-[#101d24] focus:ring-2 focus:ring-cyan-300/10"
                     autoComplete="new-password"
                     required
                   />
                   <button
                     type="button"
                     onClick={() => setShowSignUpPassword((prev) => !prev)}
-                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-zinc-500 hover:text-zinc-300"
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-500 transition hover:text-cyan-200"
                     aria-label={showSignUpPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
                   >
                     {showSignUpPassword ? (
@@ -285,21 +292,21 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
                 <div className="relative">
                   <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                    <Lock className="h-4 w-4 text-zinc-500" />
+                    <Lock className="h-4 w-4 text-slate-500" />
                   </div>
                   <input
                     type={showSignUpPassword ? 'text' : 'password'}
                     placeholder="Vérification du mot de passe"
                     value={signUpPasswordConfirm}
                     onChange={(e) => setSignUpPasswordConfirm(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2.5 pl-10 pr-12 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition focus:border-emerald-500 focus:bg-zinc-800/90"
+                    className="w-full rounded-lg border border-slate-700/80 bg-[#0d171d] py-2.5 pl-10 pr-12 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-cyan-300/70 focus:bg-[#101d24] focus:ring-2 focus:ring-cyan-300/10"
                     autoComplete="new-password"
                     required
                   />
                   <button
                     type="button"
                     onClick={() => setShowSignUpPassword((prev) => !prev)}
-                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-zinc-500 hover:text-zinc-300"
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-500 transition hover:text-cyan-200"
                     aria-label={showSignUpPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
                   >
                     {showSignUpPassword ? (
@@ -311,17 +318,17 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                 </div>
 
                 {signUpError && (
-                  <p className="text-sm text-red-400 text-center">{signUpError}</p>
+                  <p className="rounded-lg border border-red-400/20 bg-red-500/10 px-3 py-2 text-center text-xs text-red-200">{signUpError}</p>
                 )}
 
                 {signUpSuccess && (
-                  <p className="text-sm text-emerald-400 text-center">{signUpSuccess}</p>
+                  <p className="rounded-lg border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-center text-xs text-emerald-200">{signUpSuccess}</p>
                 )}
 
                 <button
                   type="submit"
                   disabled={isSignUpSubmitting}
-                  className="flex w-full items-center justify-center gap-2 rounded-full bg-emerald-600 py-2.5 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-emerald-600/30 transition hover:bg-emerald-500 hover:shadow-emerald-500/40 border border-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-200/20 bg-cyan-300/15 py-2.5 text-sm font-bold uppercase tracking-wider text-cyan-50 shadow-lg shadow-cyan-950/30 transition hover:bg-cyan-300/22 hover:shadow-cyan-400/10 focus:outline-none focus:ring-2 focus:ring-cyan-300/25 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isSignUpSubmitting ? 'Inscription...' : <><UserPlus className="h-4 w-4" />
                   Créer un compte</>}
@@ -332,7 +339,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                 <button
                   type="button"
                   onClick={togglePanel}
-                  className="text-xs font-semibold uppercase tracking-[0.25em] text-emerald-400 transition hover:text-white"
+                  className="text-xs font-semibold uppercase tracking-[0.25em] text-cyan-200 transition hover:text-white"
                 >
                   Connexion
                 </button>
@@ -351,15 +358,23 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
               }`}
             >
               {/* Panneau gauche : Déjà inscrit ? */}
-              <div className="flex h-full w-1/2 flex-col items-center justify-center bg-[#0c0c0e] px-8 text-center border-r border-zinc-800/50">
-                <Shield className="mb-3 h-10 w-10 text-emerald-400/80" />
-                <h2 className="text-2xl font-bold text-white">Nouveau sur le SIEM ? </h2>
-                <p className="mt-2 max-w-xs text-sm text-zinc-400">
-                  Enregistrez un compte administrateur.
+              <div className="flex h-full w-1/2 flex-col items-center justify-center border-r border-cyan-300/10 bg-[#071117] px-8 text-center">
+                <div className="mb-5 grid w-full max-w-xs grid-cols-3 gap-2">
+                  {telemetry.map((item) => (
+                    <div key={item.label} className="rounded-lg border border-white/[0.06] bg-white/[0.035] px-2 py-2">
+                      <p className={`font-mono text-sm font-bold ${item.tone}`}>{item.value}</p>
+                      <p className="mt-0.5 text-[9px] uppercase tracking-wider text-slate-500">{item.label}</p>
+                    </div>
+                  ))}
+                </div>
+                <Shield className="mb-3 h-10 w-10 text-cyan-200" />
+                <h2 className="text-2xl font-bold text-white">Centre de supervision</h2>
+                <p className="mt-2 max-w-xs text-sm text-slate-400">
+                  Créez un accès contrôlé pour rejoindre l'espace d'analyse Melonela.
                 </p>
                 <button
                   onClick={togglePanel}
-                  className="mt-6 flex items-center gap-2 rounded-full border border-zinc-700 bg-transparent px-6 py-2 text-xs font-bold uppercase tracking-wider text-zinc-200 transition hover:border-emerald-500 hover:text-white hover:shadow-[0_0_20px_rgba(5,150,105,0.15)]"
+                  className="mt-6 flex items-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-300/10 px-6 py-2 text-xs font-bold uppercase tracking-wider text-cyan-50 transition hover:border-cyan-200/50 hover:bg-cyan-300/15 hover:text-white"
                 >
                   <ChevronRight className="h-4 w-4" />
                   S'inscrire
@@ -367,15 +382,24 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
               </div>
 
               {/* Panneau droit : Nouveau sur le SIEM ? */}
-              <div className="flex h-full w-1/2 flex-col items-center justify-center bg-[#0c0c0e] px-8 text-center">
-                <Fingerprint className="mb-3 h-10 w-10 text-emerald-400/80" />
-                <h2 className="text-2xl font-bold text-white">Déjà inscrit ?</h2>
-                <p className="mt-2 max-w-xs text-sm text-zinc-400">
-                  Accédez au centre de contrôle.
+              <div className="flex h-full w-1/2 flex-col items-center justify-center bg-[#071117] px-8 text-center">
+                <div className="mb-5 w-full max-w-xs rounded-lg border border-cyan-300/15 bg-black/20 p-3 text-left">
+                  <div className="mb-2 flex items-center justify-between text-[10px] uppercase tracking-widest text-slate-500">
+                    <span>Security posture</span>
+                    <span className="text-emerald-300">stable</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-800">
+                    <div className="h-2 w-[78%] rounded-full bg-cyan-300/70" />
+                  </div>
+                </div>
+                <Fingerprint className="mb-3 h-10 w-10 text-cyan-200" />
+                <h2 className="text-2xl font-bold text-white">Session analyste</h2>
+                <p className="mt-2 max-w-xs text-sm text-slate-400">
+                  Reprenez la surveillance des événements système et utilisateurs.
                 </p>
                 <button
                   onClick={togglePanel}
-                  className="mt-6 flex items-center gap-2 rounded-full border border-zinc-700 bg-transparent px-6 py-2 text-xs font-bold uppercase tracking-wider text-zinc-200 transition hover:border-emerald-500 hover:text-white hover:shadow-[0_0_20px_rgba(5,150,105,0.15)]"
+                  className="mt-6 flex items-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-300/10 px-6 py-2 text-xs font-bold uppercase tracking-wider text-cyan-50 transition hover:border-cyan-200/50 hover:bg-cyan-300/15 hover:text-white"
                 >
                   <ChevronRight className="h-4 w-4" />
                   connexion
@@ -386,9 +410,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         </div>
 
         {/* ---------- AVERTISSEMENT DE SÉCURITÉ ---------- */}
-        <p className="mt-6 text-center text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-zinc-600">
-          ACCÈS RESTREINT AU PERSONNEL AUTORISÉ — TOUTES LES REQUÊTES SONT
-          JOURNALISÉES VIA PIDS
+        <p className="mt-6 text-center text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-slate-600">
+          ACCÈS RESTREINT AU PERSONNEL AUTORISÉ — ACTIONS ET SESSIONS JOURNALISÉES
         </p>
       </div>
     </div>

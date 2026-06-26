@@ -4,43 +4,43 @@
 
 :root {
   --font-size: 14px;
-  --background: #07080b;
-  --foreground: #f4f4f5;
-  --card: #101216;
-  --card-foreground: #e4e4e7;
-  --popover: #111113;
+  --background: #06080a;
+  --foreground: #eef4f8;
+  --card: #0d1216;
+  --card-foreground: #dfe8ee;
+  --popover: #0b1014;
   --popover-foreground: #f4f4f5;
-  --primary: #3b82f6;
+  --primary: #39d0c8;
   --primary-foreground: #ffffff;
-  --secondary: #1c1c1f;
-  --secondary-foreground: #a1a1aa;
-  --muted: #171a20;
-  --muted-foreground: #8b929e;
-  --accent: #3b82f6;
-  --accent-foreground: #ffffff;
-  --destructive: #ef4444;
+  --secondary: #111a20;
+  --secondary-foreground: #9fb0bd;
+  --muted: #101820;
+  --muted-foreground: #7f919d;
+  --accent: #7dd3fc;
+  --accent-foreground: #031014;
+  --destructive: #ff4d6d;
   --destructive-foreground: #ffffff;
-  --border: #2a3038;
-  --input: #151820;
-  --input-background: #151820;
-  --switch-background: #3f3f46;
+  --border: #24313a;
+  --input: #0e171d;
+  --input-background: #0e171d;
+  --switch-background: #33404a;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --ring: #3b82f6;
-  --chart-1: #3b82f6;
-  --chart-2: #10b981;
-  --chart-3: #f59e0b;
-  --chart-4: #ef4444;
-  --chart-5: #8b5cf6;
+  --ring: #39d0c8;
+  --chart-1: #39d0c8;
+  --chart-2: #2dd4bf;
+  --chart-3: #f6c85f;
+  --chart-4: #ff4d6d;
+  --chart-5: #a78bfa;
   --radius: 0.5rem;
-  --sidebar: #0d0d10;
+  --sidebar: #080c10;
   --sidebar-foreground: #f4f4f5;
-  --sidebar-primary: #3b82f6;
+  --sidebar-primary: #39d0c8;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #1c1c1f;
+  --sidebar-accent: #101820;
   --sidebar-accent-foreground: #f4f4f5;
-  --sidebar-border: #27272a;
-  --sidebar-ring: #3b82f6;
+  --sidebar-border: #21303a;
+  --sidebar-ring: #39d0c8;
 }
 
 @theme inline {
@@ -97,11 +97,35 @@
     @apply bg-background text-foreground;
     font-family: Inter, system-ui, sans-serif;
     margin: 0;
+    letter-spacing: 0;
+    background:
+      linear-gradient(180deg, rgba(57, 208, 200, 0.04), transparent 28rem),
+      var(--background);
   }
 
   button,
   input,
   select {
     font: inherit;
+  }
+
+  ::selection {
+    background: rgba(57, 208, 200, 0.28);
+    color: #ffffff;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #263741;
+    border-radius: 999px;
+    border: 2px solid #071014;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #071014;
   }
 }
