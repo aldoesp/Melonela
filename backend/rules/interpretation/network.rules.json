@@ -1,0 +1,32 @@
+[
+  {
+    "id": "network_connected",
+    "enabled": true,
+    "priority": 70,
+    "match": {
+      "message_contains": "connected"
+    },
+    "human": {
+      "title": "Connexion réseau détectée",
+      "description": "Une connexion réseau a été établie sur {{host_name}}.",
+      "category": "Network",
+      "icon": "wifi",
+      "severity": "low"
+    }
+  },
+  {
+    "id": "network_disconnected",
+    "enabled": true,
+    "priority": 70,
+    "match": {
+      "message_contains": "disconnected"
+    },
+    "human": {
+      "title": "Déconnexion réseau détectée",
+      "description": "Une connexion réseau a été interrompue sur {{host_name}}.",
+      "category": "Network",
+      "icon": "wifi-off",
+      "severity": "medium"
+    }
+  }
+]

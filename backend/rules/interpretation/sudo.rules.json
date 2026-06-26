@@ -1,0 +1,82 @@
+[
+  {
+    "id": "sudo_journalctl_view",
+    "enabled": true,
+    "priority": 100,
+    "match": {
+      "service": "sudo",
+      "command_contains": "journalctl"
+    },
+    "human": {
+      "title": "Consultation des journaux système",
+      "description": "{{username}} a consulté les journaux système avec les privilèges {{target_user}}.",
+      "category": "Audit",
+      "icon": "terminal",
+      "severity": "medium"
+    }
+  },
+  {
+    "id": "sudo_apt_update",
+    "enabled": true,
+    "priority": 90,
+    "match": {
+      "service": "sudo",
+      "command_contains": "apt update"
+    },
+    "human": {
+      "title": "Mise à jour des dépôts APT",
+      "description": "{{username}} a lancé une mise à jour des dépôts système.",
+      "category": "Package",
+      "icon": "package",
+      "severity": "low"
+    }
+  },
+  {
+    "id": "sudo_apt_install",
+    "enabled": true,
+    "priority": 90,
+    "match": {
+      "service": "sudo",
+      "command_contains": "apt install"
+    },
+    "human": {
+      "title": "Installation de paquet système",
+      "description": "{{username}} a lancé une installation de paquet avec les privilèges {{target_user}}.",
+      "category": "Package",
+      "icon": "package-plus",
+      "severity": "medium"
+    }
+  },
+  {
+    "id": "sudo_rm_recursive",
+    "enabled": true,
+    "priority": 200,
+    "match": {
+      "service": "sudo",
+      "command_contains": "rm -rf"
+    },
+    "human": {
+      "title": "Commande de suppression sensible",
+      "description": "{{username}} a exécuté une commande de suppression récursive avec sudo.",
+      "category": "Security",
+      "icon": "alert-triangle",
+      "severity": "critical"
+    }
+  },
+  {
+    "id": "sudo_systemctl_restart",
+    "enabled": true,
+    "priority": 80,
+    "match": {
+      "service": "sudo",
+      "command_contains": "systemctl restart"
+    },
+    "human": {
+      "title": "Redémarrage d'un service système",
+      "description": "{{username}} a redémarré un service système avec sudo.",
+      "category": "Service",
+      "icon": "refresh-cw",
+      "severity": "medium"
+    }
+  }
+]

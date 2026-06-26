@@ -5,6 +5,7 @@ const {
 } = require('../services/journalctlRealtimeService');
 const { parseJournalctlLog } = require('../services/parserFactory');
 const { validateMelonelaLog } = require('../services/schemaValidationService');
+const eventInterpretationEngine = require('../services/eventInterpretationEngine');
 const { insertSystemEventLog } = require('../services/auditLogService');
 const { recordUserAction } = require('../services/userActionService');
 
@@ -18,7 +19,8 @@ async function persistJournalctlLog(rawLog) {
     throw error;
   }
 
-  return insertSystemEventLog(normalized);
+  const interpreted = eventInterpretationEngine.interpret(normalized);
+  return insertSystemEventLog(interpreted);
 }
 
 async function startJournalctlLive(req, res, next) {

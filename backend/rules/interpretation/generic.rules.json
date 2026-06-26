@@ -1,0 +1,32 @@
+[
+  {
+    "id": "generic_error",
+    "enabled": true,
+    "priority": 20,
+    "match": {
+      "message_contains": "error"
+    },
+    "human": {
+      "title": "Erreur système détectée",
+      "description": "Une erreur système a été enregistrée sur {{host_name}}.",
+      "category": "System",
+      "icon": "alert-circle",
+      "severity": "medium"
+    }
+  },
+  {
+    "id": "generic_failed",
+    "enabled": true,
+    "priority": 20,
+    "match": {
+      "message_contains": "failed"
+    },
+    "human": {
+      "title": "Échec d'opération système",
+      "description": "Une opération système a échoué sur {{host_name}}.",
+      "category": "System",
+      "icon": "x-circle",
+      "severity": "medium"
+    }
+  }
+]

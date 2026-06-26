@@ -69,6 +69,13 @@ CREATE TABLE IF NOT EXISTS system_event_logs (
     target_user VARCHAR(100),
     command TEXT,
     message TEXT NOT NULL,
+    title TEXT,
+    description TEXT,
+    category VARCHAR(100),
+    icon VARCHAR(100),
+    human_severity VARCHAR(30),
+    interpretation_rule_id VARCHAR(150),
+    interpretation_confidence NUMERIC(4,2),
     raw_payload JSONB DEFAULT '{}'::jsonb,
     normalized_payload JSONB DEFAULT '{}'::jsonb,
     event_timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -83,5 +90,8 @@ CREATE INDEX IF NOT EXISTS idx_system_event_logs_service ON system_event_logs(se
 CREATE INDEX IF NOT EXISTS idx_system_event_logs_username ON system_event_logs(username);
 CREATE INDEX IF NOT EXISTS idx_system_event_logs_command ON system_event_logs(command);
 CREATE INDEX IF NOT EXISTS idx_system_event_logs_working_directory ON system_event_logs(working_directory);
+CREATE INDEX IF NOT EXISTS idx_system_event_logs_category ON system_event_logs(category);
+CREATE INDEX IF NOT EXISTS idx_system_event_logs_human_severity ON system_event_logs(human_severity);
+CREATE INDEX IF NOT EXISTS idx_system_event_logs_interpretation_rule_id ON system_event_logs(interpretation_rule_id);
 CREATE INDEX IF NOT EXISTS idx_system_event_logs_received_at ON system_event_logs(received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_system_event_logs_event_timestamp ON system_event_logs(event_timestamp DESC);

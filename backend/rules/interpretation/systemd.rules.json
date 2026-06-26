@@ -1,0 +1,65 @@
+[
+  {
+    "id": "systemd_service_started",
+    "enabled": true,
+    "priority": 50,
+    "match": {
+      "service": "systemd",
+      "message_contains": "Started"
+    },
+    "human": {
+      "title": "Service système démarré",
+      "description": "Un service système a été démarré sur {{host_name}}.",
+      "category": "Service",
+      "icon": "play-circle",
+      "severity": "low"
+    }
+  },
+  {
+    "id": "systemd_service_starting",
+    "enabled": true,
+    "priority": 40,
+    "match": {
+      "service": "systemd",
+      "message_contains": "Starting"
+    },
+    "human": {
+      "title": "Démarrage d'un service système",
+      "description": "Un service système est en cours de démarrage sur {{host_name}}.",
+      "category": "Service",
+      "icon": "loader",
+      "severity": "low"
+    }
+  },
+  {
+    "id": "systemd_service_stopped",
+    "enabled": true,
+    "priority": 80,
+    "match": {
+      "service": "systemd",
+      "message_contains": "Stopped"
+    },
+    "human": {
+      "title": "Service système arrêté",
+      "description": "Un service système a été arrêté sur {{host_name}}.",
+      "category": "Service",
+      "icon": "stop-circle",
+      "severity": "medium"
+    }
+  },
+  {
+    "id": "systemd_hostname_service",
+    "enabled": true,
+    "priority": 90,
+    "match": {
+      "message_contains": "systemd-hostnamed"
+    },
+    "human": {
+      "title": "Service Hostname démarré",
+      "description": "Le service de gestion du nom d'hôte a été lancé sur {{host_name}}.",
+      "category": "System",
+      "icon": "server",
+      "severity": "low"
+    }
+  }
+]

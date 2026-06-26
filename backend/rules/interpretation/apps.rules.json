@@ -1,0 +1,77 @@
+[
+  {
+    "id": "firefox_started",
+    "enabled": true,
+    "priority": 100,
+    "match": {
+      "message_contains": "firefox"
+    },
+    "human": {
+      "title": "Firefox lancé",
+      "description": "Mozilla Firefox a été ouvert sur {{host_name}}.",
+      "category": "Application",
+      "icon": "globe",
+      "severity": "low"
+    }
+  },
+  {
+    "id": "nautilus_started",
+    "enabled": true,
+    "priority": 100,
+    "match": {
+      "message_contains": "nautilus"
+    },
+    "human": {
+      "title": "Gestionnaire de fichiers ouvert",
+      "description": "Le gestionnaire de fichiers GNOME a été ouvert sur {{host_name}}.",
+      "category": "Application",
+      "icon": "folder",
+      "severity": "low"
+    }
+  },
+  {
+    "id": "thunar_started",
+    "enabled": true,
+    "priority": 100,
+    "match": {
+      "message_contains": "thunar"
+    },
+    "human": {
+      "title": "Gestionnaire de fichiers ouvert",
+      "description": "Le gestionnaire de fichiers Thunar a été ouvert sur {{host_name}}.",
+      "category": "Application",
+      "icon": "folder",
+      "severity": "low"
+    }
+  },
+  {
+    "id": "vscode_started",
+    "enabled": true,
+    "priority": 100,
+    "match": {
+      "message_contains": "code"
+    },
+    "human": {
+      "title": "Visual Studio Code lancé",
+      "description": "Visual Studio Code a été ouvert sur {{host_name}}.",
+      "category": "Application",
+      "icon": "code",
+      "severity": "low"
+    }
+  },
+  {
+    "id": "terminal_started",
+    "enabled": true,
+    "priority": 100,
+    "match": {
+      "message_contains": "terminal"
+    },
+    "human": {
+      "title": "Terminal ouvert",
+      "description": "Un terminal a été ouvert sur {{host_name}}.",
+      "category": "Application",
+      "icon": "terminal",
+      "severity": "low"
+    }
+  }
+]

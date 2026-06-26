@@ -1,0 +1,34 @@
+[
+  {
+    "id": "ssh_failed_password",
+    "enabled": true,
+    "priority": 150,
+    "match": {
+      "service": "sshd",
+      "message_contains": "Failed password"
+    },
+    "human": {
+      "title": "Tentative SSH échouée",
+      "description": "Une tentative de connexion SSH a échoué.",
+      "category": "Authentication",
+      "icon": "shield-alert",
+      "severity": "high"
+    }
+  },
+  {
+    "id": "ssh_accepted_password",
+    "enabled": true,
+    "priority": 140,
+    "match": {
+      "service": "sshd",
+      "message_contains": "Accepted password"
+    },
+    "human": {
+      "title": "Connexion SSH réussie",
+      "description": "Une connexion SSH a été acceptée.",
+      "category": "Authentication",
+      "icon": "shield-check",
+      "severity": "medium"
+    }
+  }
+]

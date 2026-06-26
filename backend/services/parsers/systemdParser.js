@@ -10,7 +10,7 @@ function parseSystemdLog(rawLog) {
   if (message.includes('Failed')) eventType = 'service_failed';
 
   return parseGenericJournalctl(rawLog, {
-    service: rawLog._SYSTEMD_UNIT || rawLog.SYSLOG_IDENTIFIER || 'systemd',
+    service: rawLog.SYSLOG_IDENTIFIER || 'systemd',
     event_type: eventType,
     severity: eventType === 'service_failed' ? 'high' : undefined,
   });

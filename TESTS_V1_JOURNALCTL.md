@@ -104,3 +104,41 @@ system_event_created
 
 - **Historique Live** : logs système stockés dans `system_event_logs`, route `/api/audit-logs`.
 - **Journal d'actions** : actions des utilisateurs Melonela stockées dans `user_action_logs`, route `/api/user-actions`.
+
+## V2 - Vérifier l'interprétation humaine
+
+Avec le live journalctl actif, exécuter une commande sudo :
+
+```bash
+sudo journalctl -f
+```
+
+Dans **Historique Live**, l'événement doit afficher un titre humain, par exemple :
+
+```text
+Consultation des journaux système
+dodo a consulté les journaux système avec les privilèges root.
+```
+
+Les détails doivent toujours conserver :
+
+- `message` brut
+- `raw_payload`
+- `normalized_payload`
+
+Vérification API :
+
+```bash
+curl "http://localhost:5000/api/audit-logs?page=1&limit=5&category=Audit&human_severity=medium" \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+Les objets retournés doivent contenir :
+
+- `title`
+- `description`
+- `category`
+- `icon`
+- `humanSeverity`
+- `interpretationRuleId`
+- `interpretationConfidence`

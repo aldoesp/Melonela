@@ -18,6 +18,13 @@ export interface AuditLog {
   targetUser: string | null;
   command: string | null;
   message: string;
+  title: string | null;
+  description: string | null;
+  category: string | null;
+  icon: string | null;
+  humanSeverity: "low" | "medium" | "high" | "critical" | null;
+  interpretationRuleId: string | null;
+  interpretationConfidence: number | null;
   rawPayload: Record<string, unknown>;
   normalizedPayload: Record<string, unknown>;
   eventTimestamp: string;
@@ -36,6 +43,9 @@ export interface AuditLogQuery {
   username?: string;
   command?: string;
   working_directory?: string;
+  category?: string;
+  human_severity?: string;
+  interpretation_rule_id?: string;
   date_from?: string;
   date_to?: string;
 }

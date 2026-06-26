@@ -117,9 +117,19 @@ function eventLabel(eventType: string) {
 }
 
 function severityForLog(log: AuditLog): Severity {
+  if (log.humanSeverity === "critical" || log.humanSeverity === "high") return "CRITIQUE";
+  if (log.humanSeverity === "medium") return "AVERTISSEMENT";
   if (log.severity === "critical" || log.severity === "high") return "CRITIQUE";
   if (log.severity === "medium") return "AVERTISSEMENT";
   return "INFO";
+}
+
+function displayTitle(log: AuditLog) {
+  return log.title || eventLabel(log.eventType);
+}
+
+function displayDescription(log: AuditLog) {
+  return log.description || log.message;
 }
 
 function formatTime(value: string) {
@@ -595,7 +605,10 @@ function DashboardView({
                 <span className="font-mono text-zinc-500 tabular-nums text-[11px]">{formatTime(log.eventTimestamp)}</span>
                 <span className="text-zinc-400 truncate font-mono text-[11px]">{log.service ?? log.eventType}</span>
                 <span className="text-zinc-300 flex items-center gap-1.5 truncate"><Server size={10} className="text-zinc-600 flex-shrink-0" />{log.username ?? "-"}</span>
-                <span className="text-zinc-200 truncate">{log.message}</span>
+                <span className="min-w-0">
+                  <span className="block truncate text-zinc-100">{displayTitle(log)}</span>
+                  <span className="block truncate text-[10px] text-zinc-500">{displayDescription(log)}</span>
+                </span>
                 <span><Badge level={severity} /></span>
                 <span className="font-mono text-zinc-500 text-[11px] truncate">{log.command ?? "-"}</span>
                 <span className="flex items-center justify-center">
@@ -604,7 +617,7 @@ function DashboardView({
               </button>
               <div className="overflow-hidden transition-all duration-300" style={{ maxHeight: expanded === log.id ? "200px" : "0px" }}>
                 <div className="px-5 py-3 bg-zinc-950/90 border-b border-border">
-                  <JsonBlock data={{ ...log, eventLabel: eventLabel(log.eventType), uiSeverity: severity }} />
+                  <JsonBlock data={{ ...log, title: displayTitle(log), description: displayDescription(log), rawMessage: log.message, eventLabel: eventLabel(log.eventType), uiSeverity: severity }} />
                 </div>
               </div>
             </div>
@@ -655,6 +668,8 @@ function HistoriqueLiveView({
   const [blink, setBlink]           = useState(true);
   const [search, setSearch] = useState(query.search ?? "");
   const [severity, setSeverity] = useState(query.severity ?? "");
+  const [humanSeverity, setHumanSeverity] = useState(query.human_severity ?? "");
+  const [category, setCategory] = useState(query.category ?? "");
   const [eventType, setEventType] = useState(query.event_type ?? "");
   const [service, setService] = useState(query.service ?? "");
   const [username, setUsername] = useState(query.username ?? "");
@@ -677,22 +692,24 @@ function HistoriqueLiveView({
   const critN = logs.filter((l) => severityForLog(l) === "CRITIQUE").length;
   const warnN = logs.filter((l) => severityForLog(l) === "AVERTISSEMENT").length;
   const infoN = logs.filter((l) => severityForLog(l) === "INFO").length;
-  const hasFilter = Boolean(query.search || query.severity || query.event_type || query.service || query.username || query.command || query.date_from || query.date_to);
+  const hasFilter = Boolean(query.search || query.severity || query.human_severity || query.category || query.event_type || query.service || query.username || query.command || query.date_from || query.date_to);
 
   const applyFilters = () => {
-    onQueryChange({ search, severity, event_type: eventType, service, username, command, date_from: dateFrom, date_to: dateTo, page: 1 });
+    onQueryChange({ search, severity, human_severity: humanSeverity, category, event_type: eventType, service, username, command, date_from: dateFrom, date_to: dateTo, page: 1 });
   };
 
   const resetFilters = () => {
     setSearch("");
     setSeverity("");
+    setHumanSeverity("");
+    setCategory("");
     setEventType("");
     setService("");
     setUsername("");
     setCommand("");
     setDateFrom("");
     setDateTo("");
-    onQueryChange({ search: "", severity: "", event_type: "", service: "", username: "", command: "", date_from: "", date_to: "", page: 1 });
+    onQueryChange({ search: "", severity: "", human_severity: "", category: "", event_type: "", service: "", username: "", command: "", date_from: "", date_to: "", page: 1 });
   };
 
   return (
@@ -774,6 +791,22 @@ function HistoriqueLiveView({
           <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
         </div>
 
+        <div className="relative min-w-0 flex-1 max-w-[150px]">
+          <select value={humanSeverity} onChange={(e) => setHumanSeverity(e.target.value)}
+            className="w-full appearance-none bg-muted border border-border rounded-lg pl-3 pr-7 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500/50 cursor-pointer">
+            <option value="">Gravité humaine</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="critical">Critical</option>
+          </select>
+          <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+        </div>
+
+        <input value={category} onChange={(e) => setCategory(e.target.value)}
+          className="w-28 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/50"
+          placeholder="Catégorie" />
+
         <div className="relative min-w-0 flex-1 max-w-[180px]">
           <select value={eventType} onChange={(e) => setEventType(e.target.value)}
             className="w-full appearance-none bg-muted border border-border rounded-lg pl-3 pr-7 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500/50 cursor-pointer">
@@ -833,7 +866,7 @@ function HistoriqueLiveView({
           <span>Utilisateur</span>
           <span>PWD</span>
           <span>Commande</span>
-          <span>Message</span>
+          <span>Interprétation</span>
           <span>Cible</span>
           <span />
         </div>
@@ -882,9 +915,12 @@ function HistoriqueLiveView({
                   </span>
                   <span className="font-mono text-[11px] text-zinc-500 truncate self-center">{log.workingDirectory ?? "-"}</span>
                   <span className="font-mono text-[11px] text-zinc-400 truncate self-center">{log.command ?? "-"}</span>
-                  <span className={`text-[11px] font-medium truncate self-center ${SEV[severity].text}`}>
-                    {log.message}
-                    <span className="ml-2"><Badge level={severity} /></span>
+                  <span className="min-w-0 self-center">
+                    <span className={`block truncate text-[11px] font-semibold ${SEV[severity].text}`}>
+                      {displayTitle(log)}
+                      <span className="ml-2"><Badge level={severity} /></span>
+                    </span>
+                    <span className="mt-0.5 block truncate text-[10px] text-zinc-500">{displayDescription(log)}</span>
                   </span>
                   <span className="font-mono text-[11px] text-zinc-500 self-center">{log.targetUser ?? "-"}</span>
                   <span className="flex items-center justify-center self-center">
@@ -901,7 +937,7 @@ function HistoriqueLiveView({
                     <div className="flex items-center gap-3 mb-4">
                       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${SEV[severity].dot}`} />
                       <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">
-                        Détail de l'événement #{log.id} — {log.eventType}
+                        Détail de l'événement #{log.id} — {displayTitle(log)}
                       </span>
                       <div className="flex-1 h-px bg-zinc-800" />
                       <Badge level={severity} />
@@ -915,6 +951,8 @@ function HistoriqueLiveView({
                       <div className="w-44 flex-shrink-0 space-y-3">
                         {([
                           ["Type",        eventLabel(log.eventType)],
+                          ["Catégorie",   log.category ?? "-"],
+                          ["Règle",       log.interpretationRuleId ?? "-"],
                           ["Service",     log.service ?? "-"],
                           ["Utilisateur", log.username ?? "-"],
                           ["PWD",         log.workingDirectory ?? "-"],
@@ -952,7 +990,14 @@ function HistoriqueLiveView({
                           event_type:  log.eventType,
                           libelle:     eventLabel(log.eventType),
                           severity:    log.severity,
+                          human_severity: log.humanSeverity,
                           dangerosite: severity,
+                          title:       log.title,
+                          description: log.description,
+                          category:    log.category,
+                          icon:        log.icon,
+                          interpretation_rule_id: log.interpretationRuleId,
+                          interpretation_confidence: log.interpretationConfidence,
                           username:    log.username,
                           tty:         log.tty,
                           working_directory: log.workingDirectory,
@@ -2749,6 +2794,8 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     limit: 20,
     search: "",
     severity: "",
+    human_severity: "",
+    category: "",
     event_type: "",
     source_type: "",
     service: "",
@@ -2776,6 +2823,8 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
       const hasSearch = Boolean(nextQuery.search?.trim());
       const hasFilters = Boolean(
         nextQuery.severity
+        || nextQuery.human_severity
+        || nextQuery.category
         || nextQuery.event_type
         || nextQuery.source_type
         || nextQuery.service
