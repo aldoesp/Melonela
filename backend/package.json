@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "nodemon --legacy-watch server.js",
     "start": "node server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test tests/*.test.js",
+    "logs:archive": "node src/scripts/archiveOldSystemLogs.js"
   },
   "keywords": [],
   "author": "",

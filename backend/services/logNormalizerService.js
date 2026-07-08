@@ -58,19 +58,28 @@ function normalizeJournalctlLog(rawLog) {
   const message = String(rawLog.MESSAGE || rawLog.message || '').trim();
   const eventType = detectEventType(message);
   const severity = detectSeverity(message, eventType);
-  const sourceName = rawLog._HOSTNAME || os.hostname() || 'localhost';
+  const hostName = rawLog._HOSTNAME || os.hostname() || 'localhost';
   const systemdUnit = rawLog._SYSTEMD_UNIT || rawLog.UNIT || null;
 
   return {
-    source_name: sourceName,
-    source_type: 'journalctl',
+    source_name: 'journalctl',
+    source_type: 'system',
+    process_name: rawLog._COMM || rawLog.SYSLOG_IDENTIFIER || null,
+    process_id: rawLog._PID || null,
+    host_name: hostName,
     event_type: eventType,
     severity,
     message: message || 'Événement journalctl sans message',
     event_timestamp: timestampFromJournalctl(rawLog),
-    raw_payload: rawLog,
+    raw_payload: {
+      parser: 'journalParser',
+      parser_status: 'success',
+      technical_severity: rawLog.PRIORITY || rawLog.LOG_LEVEL || null,
+      journal_cursor: rawLog.__CURSOR || null,
+      transport: rawLog._TRANSPORT || null,
+    },
     normalized_payload: {
-      hostname: sourceName,
+      hostname: hostName,
       systemd_unit: systemdUnit,
       pid: rawLog._PID || null,
       uid: rawLog._UID || null,

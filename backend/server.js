@@ -10,8 +10,10 @@ const profileRoutes = require('./routes/profileRoutes');
 const userRoutes = require('./routes/userRoutes');
 const exportRoutes = require('./routes/exportRoutes');
 const ingestRoutes = require('./routes/ingestRoutes');
+const logArchiveRoutes = require('./routes/logArchiveRoutes');
 const { ensureUserActionTable } = require('./services/userActionService');
 const { ensureSystemEventLogTable } = require('./services/auditLogService');
+const { ensureLogArchiveTable } = require('./services/logArchiveService');
 const { ensureUserSchema } = require('./services/schemaService');
 const { setSocketServer } = require('./realtime/socket');
 const errorHandler = require('./middlewares/errorHandler');
@@ -57,6 +59,7 @@ app.use('/api/profile', profileRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/export', exportRoutes);
 app.use('/api/ingest', ingestRoutes);
+app.use('/api/logs', logArchiveRoutes);
 
 // ─── Route de test ───
 app.get('/api/health', (req, res) => {
@@ -70,6 +73,7 @@ Promise.all([
   ensureUserSchema(),
   ensureUserActionTable(),
   ensureSystemEventLogTable(),
+  ensureLogArchiveTable(),
 ])
   .then(() => {
     server.listen(PORT, () => {

@@ -6,6 +6,20 @@ function getService(rawLog) {
   return rawLog.SYSLOG_IDENTIFIER || rawLog._COMM || rawLog._SYSTEMD_UNIT || 'journalctl';
 }
 
+function buildUsefulRawPayload(rawLog, parserStatus = 'success') {
+  return {
+    parser: 'journalParser',
+    parser_status: parserStatus,
+    technical_severity: rawLog.PRIORITY || rawLog.LOG_LEVEL || null,
+    journal_cursor: rawLog.__CURSOR || null,
+    boot_id: rawLog._BOOT_ID || null,
+    machine_id: rawLog._MACHINE_ID || null,
+    transport: rawLog._TRANSPORT || null,
+    uid: rawLog._UID || null,
+    gid: rawLog._GID || null,
+  };
+}
+
 function parseGenericJournalctl(rawLog, overrides = {}) {
   const hostName = rawLog._HOSTNAME || os.hostname() || 'localhost';
   const processName = rawLog._COMM || rawLog.SYSLOG_IDENTIFIER || null;
@@ -15,8 +29,8 @@ function parseGenericJournalctl(rawLog, overrides = {}) {
   const message = maskSensitiveText(overrides.message || rawMessage);
 
   return {
-    source_name: hostName,
-    source_type: 'journalctl',
+    source_name: 'journalctl',
+    source_type: 'system',
     service,
     process_name: processName,
     process_id: rawLog._PID || null,
@@ -30,7 +44,7 @@ function parseGenericJournalctl(rawLog, overrides = {}) {
     command: overrides.command ? maskSensitiveText(overrides.command) : null,
     message,
     event_timestamp: timestampFromJournalctl(rawLog),
-    raw_payload: maskSensitivePayload(rawLog),
+    raw_payload: maskSensitivePayload(buildUsefulRawPayload(rawLog)),
     normalized_payload: {
       hostname: hostName,
       service,
@@ -46,5 +60,6 @@ function parseGenericJournalctl(rawLog, overrides = {}) {
 }
 
 module.exports = {
+  buildUsefulRawPayload,
   parseGenericJournalctl,
 };
