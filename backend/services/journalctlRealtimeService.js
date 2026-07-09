@@ -6,6 +6,36 @@ let startedAt = null;
 let lastError = null;
 let processedCount = 0;
 let rejectedCount = 0;
+let syncPosition = null;
+
+function formatJournalctlSince(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  // Evite de relire la dernière ligne déjà stockée quand on n'a pas de curseur.
+  const next = new Date(date.getTime() + 1);
+  return next.toISOString().replace('T', ' ').replace('Z', ' UTC');
+}
+
+function buildJournalctlFollowArgs({ journalCursor, eventTimestamp } = {}) {
+  const args = ['-f', '-o', 'json'];
+
+  if (journalCursor) {
+    return ['--after-cursor', journalCursor, ...args];
+  }
+
+  const since = eventTimestamp ? formatJournalctlSince(eventTimestamp) : null;
+  if (since) {
+    return ['--since', since, ...args];
+  }
+
+  const initialSince = process.env.JOURNALCTL_INITIAL_SYNC_SINCE;
+  if (initialSince) {
+    return ['--since', initialSince, ...args];
+  }
+
+  return args;
+}
 
 function getJournalctlStreamStatus() {
   return {
@@ -14,6 +44,7 @@ function getJournalctlStreamStatus() {
     processedCount,
     rejectedCount,
     lastError,
+    syncPosition,
   };
 }
 
@@ -22,7 +53,7 @@ function isJournalctlStreamRunning() {
 }
 
 // Lance journalctl -f -o json une seule fois et traite chaque ligne sans bloquer Express.
-function startJournalctlStream({ onLog, onError } = {}) {
+function startJournalctlStream({ onLog, onError, syncFrom } = {}) {
   if (journalctlProcess) {
     return {
       started: false,
@@ -35,9 +66,11 @@ function startJournalctlStream({ onLog, onError } = {}) {
   startedAt = new Date().toISOString();
   processedCount = 0;
   rejectedCount = 0;
+  syncPosition = syncFrom || null;
+  const args = buildJournalctlFollowArgs(syncFrom);
 
   try {
-    journalctlProcess = spawn('journalctl', ['-f', '-o', 'json'], {
+    journalctlProcess = spawn('journalctl', args, {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (error) {
@@ -81,7 +114,10 @@ function startJournalctlStream({ onLog, onError } = {}) {
 
   return {
     started: true,
-    message: 'Journalctl stream started',
+    message: syncFrom?.journalCursor || syncFrom?.eventTimestamp
+      ? 'Journalctl stream started with backlog sync'
+      : 'Journalctl stream started',
+    args,
     status: getJournalctlStreamStatus(),
   };
 }
@@ -106,6 +142,8 @@ function stopJournalctlStream() {
 }
 
 module.exports = {
+  buildJournalctlFollowArgs,
+  formatJournalctlSince,
   startJournalctlStream,
   stopJournalctlStream,
   isJournalctlStreamRunning,

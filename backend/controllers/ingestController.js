@@ -6,7 +6,7 @@ const {
 const { parseJournalctlLog } = require('../services/parserFactory');
 const { validateMelonelaLog } = require('../services/schemaValidationService');
 const eventInterpretationEngine = require('../services/eventInterpretationEngine');
-const { insertSystemEventLog } = require('../services/auditLogService');
+const { getLatestSystemEventLogPosition, insertSystemEventLog } = require('../services/auditLogService');
 const { recordUserAction } = require('../services/userActionService');
 
 async function persistJournalctlLog(rawLog) {
@@ -25,7 +25,9 @@ async function persistJournalctlLog(rawLog) {
 
 async function startJournalctlLive(req, res, next) {
   try {
+    const syncFrom = await getLatestSystemEventLogPosition();
     const result = startJournalctlStream({
+      syncFrom,
       onLog: persistJournalctlLog,
       onError: (error) => {
         console.error('Erreur journalctl -f:', error.message);
@@ -41,7 +43,7 @@ async function startJournalctlLive(req, res, next) {
     });
 
     res.status(result.started ? 201 : 200).json({
-      message: result.started ? 'Suivi journalctl -f démarré' : result.message,
+      message: result.started ? 'Synchronisation journalctl démarrée' : result.message,
       ...result,
     });
   } catch (error) {

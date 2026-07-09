@@ -240,6 +240,21 @@ async function insertSystemEventLog(log) {
   return created;
 }
 
+async function getLatestSystemEventLogPosition() {
+  const result = await pool.query(
+    `SELECT event_timestamp, raw_payload->>'journal_cursor' AS journal_cursor
+     FROM system_event_logs
+     ORDER BY event_timestamp DESC, received_at DESC, id DESC
+     LIMIT 1`
+  );
+
+  const row = result.rows[0];
+  return {
+    eventTimestamp: row?.event_timestamp || null,
+    journalCursor: row?.journal_cursor || null,
+  };
+}
+
 async function listAuditLogs(query = {}) {
   const page = toPositiveInt(query.page, 1, 100000);
   const limit = toPositiveInt(query.limit, 20, 100);
@@ -297,6 +312,7 @@ async function listAuditLogs(query = {}) {
 
 module.exports = {
   ensureSystemEventLogTable,
+  getLatestSystemEventLogPosition,
   insertSystemEventLog,
   listAuditLogs,
   mapSystemEventLog,

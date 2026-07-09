@@ -124,12 +124,46 @@ function severityForLog(log: AuditLog): Severity {
   return "INFO";
 }
 
+function networkManagerLeaseDetails(log: AuditLog) {
+  if (log.service !== "NetworkManager" && log.processName !== "NetworkManager") return null;
+
+  const payloadIp = log.normalizedPayload?.ip;
+  const payloadInterface = log.normalizedPayload?.interface;
+  const messageIp = log.message.match(/\baddress=(?<ip>\d{1,3}(?:\.\d{1,3}){3})\b/)?.groups?.ip;
+  const messageInterface = log.message.match(/\bdhcp4\s+\((?<iface>[^)]+)\)/i)?.groups?.iface;
+  const ip = typeof payloadIp === "string" && payloadIp.trim() ? payloadIp : messageIp;
+  const networkInterface = typeof payloadInterface === "string" && payloadInterface.trim() ? payloadInterface : messageInterface;
+  const isLease = log.eventType === "network_dhcp_lease_acquired"
+    || (/dhcp4/i.test(log.message) && /new lease/i.test(log.message));
+
+  if (!isLease || !ip || !networkInterface) return null;
+
+  return { ip, networkInterface };
+}
+
+function networkManagerLeaseDescription(log: AuditLog) {
+  const details = networkManagerLeaseDetails(log);
+  if (!details) return null;
+  const { ip, networkInterface } = details;
+  return `NetworkManager a obtenu l’adresse IP ${ip} sur l’interface ${networkInterface}.`;
+}
+
 function displayTitle(log: AuditLog) {
-  return log.title || eventLabel(log.eventType);
+  return networkManagerLeaseDescription(log) || log.title || eventLabel(log.eventType);
 }
 
 function displayDescription(log: AuditLog) {
-  return log.description || log.message;
+  return networkManagerLeaseDescription(log) || log.description || log.message;
+}
+
+function logParserName(log: AuditLog) {
+  const rawParser = log.rawPayload?.parser || log.rawPayload?.parser_name || log.rawPayload?.parserName;
+  if (typeof rawParser === "string" && rawParser.trim()) return rawParser;
+
+  const normalizedParser = log.normalizedPayload?.parser || log.normalizedPayload?.parser_name || log.normalizedPayload?.parserName;
+  if (typeof normalizedParser === "string" && normalizedParser.trim()) return normalizedParser;
+
+  return "-";
 }
 
 function formatTime(value: string) {
@@ -191,8 +225,8 @@ function JsonBlock({ data }: { data: Record<string, unknown> }) {
   );
   return (
     <pre
-      className="text-[11px] font-mono leading-relaxed bg-black/70 rounded-lg p-4 overflow-x-auto"
-      style={{ scrollbarWidth: "none" } as React.CSSProperties}
+      className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-zinc-800/80 bg-black/70 p-4 font-mono text-[11px] leading-relaxed text-zinc-300"
+      style={{ scrollbarWidth: "thin" } as React.CSSProperties}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );
@@ -930,7 +964,7 @@ function HistoriqueLiveView({
 
                 {/* Accordion */}
                 <div className="overflow-hidden transition-all duration-300 ease-in-out"
-                  style={{ maxHeight: isOpen ? "500px" : "0px" }}>
+                  style={{ maxHeight: isOpen ? "680px" : "0px" }}>
                   <div className="bg-[#070709] border-b border-zinc-800/80 px-4 py-4">
 
                     {/* Accordion header */}
@@ -945,11 +979,12 @@ function HistoriqueLiveView({
                     </div>
 
                     {/* Two-column: summary pills + JSON */}
-                    <div className="flex gap-5">
+                    <div className="grid grid-cols-[11rem_minmax(0,1fr)] gap-5">
 
                       {/* Left: field summary */}
-                      <div className="w-44 flex-shrink-0 space-y-3">
+                      <div className="min-w-0 space-y-3">
                         {([
+                          ["Parser",      logParserName(log)],
                           ["Type",        eventLabel(log.eventType)],
                           ["Catégorie",   log.category ?? "-"],
                           ["Règle",       log.interpretationRuleId ?? "-"],
@@ -981,6 +1016,7 @@ function HistoriqueLiveView({
                         <JsonBlock data={{
                           id:          log.id,
                           timestamp:   log.eventTimestamp,
+                          parser:      logParserName(log),
                           source_name: log.sourceName,
                           source_type: log.sourceType,
                           service:     log.service,
@@ -992,8 +1028,8 @@ function HistoriqueLiveView({
                           severity:    log.severity,
                           human_severity: log.humanSeverity,
                           dangerosite: severity,
-                          title:       log.title,
-                          description: log.description,
+                          title:       displayTitle(log),
+                          description: displayDescription(log),
                           category:    log.category,
                           icon:        log.icon,
                           interpretation_rule_id: log.interpretationRuleId,
