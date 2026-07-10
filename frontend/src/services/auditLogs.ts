@@ -62,6 +62,20 @@ export interface AuditLogResponse {
   pagination: AuditLogPagination;
 }
 
+export interface AuditLogHourlyStatsPoint {
+  bucketStart: string;
+  info: number;
+  warning: number;
+  critical: number;
+  total: number;
+}
+
+export interface AuditLogHourlyStatsResponse {
+  hours: number;
+  generatedAt: string;
+  data: AuditLogHourlyStatsPoint[];
+}
+
 export interface JournalctlLiveStatus {
   running: boolean;
   startedAt: string | null;
@@ -132,6 +146,27 @@ export function searchAuditLogs(search: string, query: AuditLogQuery = {}) {
 
 export function filterAuditLogs(query: AuditLogQuery = {}) {
   return requestAuditLogs({ ...query, page: query.page ?? 1 });
+}
+
+export async function getAuditLogHourlyStats(hours = 24): Promise<AuditLogHourlyStatsResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/audit-logs/stats/hourly?hours=${hours}`, {
+    headers: {
+      Authorization: `Bearer ${getToken()}`,
+    },
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (response.status === 401) {
+    notifyUnauthorized();
+    throw new UnauthorizedError(data?.error);
+  }
+
+  if (!response.ok) {
+    throw new Error(data?.error || `Erreur ${response.status}`);
+  }
+
+  return data;
 }
 
 async function requestJournalctlLive(path: string, method = "GET"): Promise<JournalctlLiveStatus> {

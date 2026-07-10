@@ -1,5 +1,6 @@
 const { parseGenericJournalctl } = require('./parsers/genericJournalctlParser');
 const { parseNetworkManagerLog } = require('./parsers/networkManagerParser');
+const { parsePcUsageLog } = require('./parsers/pcUsageParser');
 const { parseSshdLog } = require('./parsers/sshdParser');
 const { parseSudoLog } = require('./parsers/sudoParser');
 const { parseSystemdLog } = require('./parsers/systemdParser');
@@ -21,6 +22,7 @@ function parseJournalctlLog(rawLog) {
   if (includesSource(rawLog, 'sshd')) return parseSshdLog(rawLog);
   if (includesSource(rawLog, 'systemd')) return parseSystemdLog(rawLog);
   if (includesSource(rawLog, 'networkmanager')) return parseNetworkManagerLog(rawLog);
+  if (includesSource(rawLog, 'pc_usage.sh')) return parsePcUsageLog(rawLog);
 
   return parseGenericJournalctl(rawLog);
 }

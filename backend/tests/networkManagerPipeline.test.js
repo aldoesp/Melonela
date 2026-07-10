@@ -22,23 +22,20 @@ test('journalctl JSON NetworkManager lease keeps precise description for UI', ()
   assert.equal(interpreted.service, 'NetworkManager');
   assert.equal(interpreted.process_name, 'NetworkManager');
   assert.equal(interpreted.process_id, '866');
-  assert.equal(interpreted.event_type, 'network_dhcp_lease_acquired');
-  assert.equal(interpreted.description, 'NetworkManager a obtenu l’adresse IP 192.168.43.197 sur l’interface wlan0.');
-  assert.equal(interpreted.title, 'Bail DHCP obtenu');
-  assert.equal(interpreted.category, 'network');
-  assert.deepEqual(interpreted.normalized_payload, {
-    hostname: 'localhost',
-    service: 'NetworkManager',
-    process_name: 'NetworkManager',
-    process_id: '866',
-    uid: null,
-    transport: null,
-    systemd_unit: null,
-    syslog_identifier: 'NetworkManager',
-    interface: 'wlan0',
-    ip: '192.168.43.197',
-    protocol: 'dhcp4',
-    action: 'dhcp4_new_lease',
-  });
+  assert.equal(interpreted.event_type, 'network_dhcp4_lease_acquired');
+  assert.equal(interpreted.description, 'L’interface wlan0 a obtenu un bail DHCPv4 avec l’adresse 192.168.43.197.');
+  assert.equal(interpreted.title, 'Bail DHCPv4 obtenu');
+  assert.equal(interpreted.category, 'dhcp');
+  assert.equal(interpreted.normalized_payload.hostname, 'localhost');
+  assert.equal(interpreted.normalized_payload.service, 'NetworkManager');
+  assert.equal(interpreted.normalized_payload.process_name, 'NetworkManager');
+  assert.equal(interpreted.normalized_payload.process_id, '866');
+  assert.equal(interpreted.normalized_payload.syslog_identifier, 'NetworkManager');
+  assert.equal(interpreted.normalized_payload.interface, 'wlan0');
+  assert.equal(interpreted.normalized_payload.ip, '192.168.43.197');
+  assert.equal(interpreted.normalized_payload.ip_address, '192.168.43.197');
+  assert.equal(interpreted.normalized_payload.action, 'nm_dhcp4_new_lease');
+  assert.equal(interpreted.normalized_payload.nm_level, 'info');
+  assert.equal(interpreted.normalized_payload.normalized, true);
   assert.equal(Object.prototype.hasOwnProperty.call(interpreted.raw_payload, 'raw_log'), false);
 });

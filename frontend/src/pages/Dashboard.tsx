@@ -8,14 +8,16 @@ import {
   FileDown, FileCog, CalendarDays, CheckSquare, Square,
   Clock, HardDrive, CheckCircle2, Loader2, XCircle as XCircleIcon,
   ChevronUp, Trash, Copy, RotateCw, KeyRound, Cloud, MonitorCog,
-  UserCog, History, ShieldCheck, Save,
+  UserCog, History, ShieldCheck, Save, Languages,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
 import {
   deleteUser,
+  fetchExportBlob,
   getExportUrl,
   getCurrentUser,
   getMyUserActions,
@@ -30,12 +32,14 @@ import type { UserActionLog, UserProfile } from "../api/authApi";
 import {
   connectAuditLogSocket,
   filterAuditLogs,
+  getAuditLogHourlyStats,
   getAuditLogs,
   getJournalctlLiveStatus,
   searchAuditLogs,
   startJournalctlLive,
   stopJournalctlLive,
   type AuditLog,
+  type AuditLogHourlyStatsPoint,
   type AuditLogPagination,
   type AuditLogQuery,
   type JournalctlLiveStatus,
@@ -76,6 +80,17 @@ const NAV_LABELS: Record<NavId, string> = {
   administration: "Administration",
 };
 
+const NAV_I18N_KEYS: Record<NavId, string> = {
+  dashboard: "nav.dashboard",
+  live: "nav.live",
+  rapports: "nav.reports",
+  parametres: "nav.settings",
+  profil: "nav.profile",
+  sessions: "nav.sessions",
+  ssh: "nav.ssh",
+  administration: "nav.administration",
+};
+
 const EVENT_LABELS: Record<string, string> = {
   ssh_failed: "Échec SSH",
   service_started: "Service démarré",
@@ -83,8 +98,6 @@ const EVENT_LABELS: Record<string, string> = {
   system_error: "Erreur système",
   system_event: "Événement système",
 };
-
-const EVENT_TYPES = Object.entries(EVENT_LABELS).map(([value, label]) => ({ value, label }));
 
 const USER_ACTION_LABELS: Record<string, string> = {
   LOGIN_SUCCESS: "Connexion réussie",
@@ -127,13 +140,14 @@ function severityForLog(log: AuditLog): Severity {
 function networkManagerLeaseDetails(log: AuditLog) {
   if (log.service !== "NetworkManager" && log.processName !== "NetworkManager") return null;
 
-  const payloadIp = log.normalizedPayload?.ip;
+  const payloadIp = log.normalizedPayload?.ip || log.normalizedPayload?.ip_address;
   const payloadInterface = log.normalizedPayload?.interface;
   const messageIp = log.message.match(/\baddress=(?<ip>\d{1,3}(?:\.\d{1,3}){3})\b/)?.groups?.ip;
   const messageInterface = log.message.match(/\bdhcp4\s+\((?<iface>[^)]+)\)/i)?.groups?.iface;
   const ip = typeof payloadIp === "string" && payloadIp.trim() ? payloadIp : messageIp;
   const networkInterface = typeof payloadInterface === "string" && payloadInterface.trim() ? payloadInterface : messageInterface;
   const isLease = log.eventType === "network_dhcp_lease_acquired"
+    || log.eventType === "network_dhcp4_lease_acquired"
     || (/dhcp4/i.test(log.message) && /new lease/i.test(log.message));
 
   if (!isLease || !ip || !networkInterface) return null;
@@ -178,29 +192,26 @@ function isAdminRole(role?: string | null) {
   return role === "admin" || role === "super_admin";
 }
 
-function buildHourlyData(logs: AuditLog[]) {
-  const hours = Array.from({ length: 24 }, (_, hour) => ({
-    h: `${String(hour).padStart(2, "0")}h`,
-    i: 0,
-    a: 0,
-    c: 0,
-  }));
+function buildHourlyData(stats: AuditLogHourlyStatsPoint[]) {
+  return stats.map((point) => {
+    const bucketDate = new Date(point.bucketStart);
+    const hour = Number.isNaN(bucketDate.getTime()) ? "--" : String(bucketDate.getHours()).padStart(2, "0");
 
-  logs.forEach((log) => {
-    const hour = new Date(log.eventTimestamp).getHours();
-    const severity = severityForLog(log);
-    if (severity === "CRITIQUE") hours[hour].c += 1;
-    else if (severity === "AVERTISSEMENT") hours[hour].a += 1;
-    else hours[hour].i += 1;
+    return {
+      h: `${hour}h`,
+      i: point.info,
+      a: point.warning,
+      c: point.critical,
+    };
   });
-
-  return hours;
 }
 
-function buildSeverityData(logs: AuditLog[]) {
+function buildSeverityData(stats: AuditLogHourlyStatsPoint[]) {
   const counts: Record<Severity, number> = { INFO: 0, AVERTISSEMENT: 0, CRITIQUE: 0 };
-  logs.forEach((log) => {
-    counts[severityForLog(log)] += 1;
+  stats.forEach((point) => {
+    counts.INFO += point.info;
+    counts.AVERTISSEMENT += point.warning;
+    counts.CRITIQUE += point.critical;
   });
 
   return [
@@ -208,6 +219,37 @@ function buildSeverityData(logs: AuditLog[]) {
     { name: "Avertissement", value: counts.AVERTISSEMENT, color: C.warn },
     { name: "Critique", value: counts.CRITIQUE, color: C.crit },
   ];
+}
+
+function addLogToHourlyStats(stats: AuditLogHourlyStatsPoint[], log: AuditLog) {
+  const eventDate = new Date(log.eventTimestamp);
+  if (Number.isNaN(eventDate.getTime())) return stats;
+
+  const severity = severityForLog(log);
+  let matched = false;
+  const nextStats = stats.map((point) => {
+    const bucketDate = new Date(point.bucketStart);
+    if (
+      Number.isNaN(bucketDate.getTime())
+      || bucketDate.getFullYear() !== eventDate.getFullYear()
+      || bucketDate.getMonth() !== eventDate.getMonth()
+      || bucketDate.getDate() !== eventDate.getDate()
+      || bucketDate.getHours() !== eventDate.getHours()
+    ) {
+      return point;
+    }
+
+    matched = true;
+    return {
+      ...point,
+      info: severity === "INFO" ? point.info + 1 : point.info,
+      warning: severity === "AVERTISSEMENT" ? point.warning + 1 : point.warning,
+      critical: severity === "CRITIQUE" ? point.critical + 1 : point.critical,
+      total: point.total + 1,
+    };
+  });
+
+  return matched ? nextStats : stats;
 }
 
 // ── JSON syntax highlighter ────────────────────────────────────────────────────
@@ -299,7 +341,10 @@ function Shell({
   canUseAdmin: boolean;
   children: React.ReactNode;
 }) {
+  const { t, i18n } = useTranslation();
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const currentUser = getCurrentUser();
   const username = currentUser?.username ?? "Utilisateur";
   const role = currentUser?.role ?? "auditor";
@@ -309,44 +354,153 @@ function Shell({
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("") || "U";
-  const date = new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  const locale = i18n.language === "en" ? "en-US" : "fr-FR";
+  const date = new Date().toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
   const navItems = NAV_ITEMS.filter((item) => item.id !== "administration" || canUseAdmin);
 
   const profileItems: { label: string; icon: React.ElementType; nav?: NavId }[] = [
-    { label: "Mon Profil", icon: UserCog, nav: "profil" },
-    { label: "Journal de mes actions", icon: History, nav: "sessions" },
-    { label: "Sécurité & Clés SSH", icon: ShieldCheck, nav: "ssh" },
+    { label: t("nav.profile"), icon: UserCog, nav: "profil" },
+    { label: t("nav.sessions"), icon: History, nav: "sessions" },
+    { label: t("nav.ssh"), icon: ShieldCheck, nav: "ssh" },
   ];
+
+  const handleNav = (id: NavId, closeMobile = false) => {
+    onNav(id);
+    if (closeMobile) setMobileSidebarOpen(false);
+  };
+
+  const toggleLanguage = () => {
+    void i18n.changeLanguage(i18n.language === "fr" ? "en" : "fr");
+  };
 
   return (
     <div className="h-screen w-screen flex overflow-hidden bg-background text-foreground" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+      {mobileSidebarOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <button
+            type="button"
+            aria-label={t("common.closeSidebar")}
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setMobileSidebarOpen(false)}
+          />
+          <aside className="relative flex h-full w-[min(20rem,calc(100vw-2rem))] flex-col border-r border-cyan-300/10 bg-[#070d11] shadow-[24px_0_80px_rgba(0,0,0,0.55)] transition-transform duration-300">
+            <div className="flex items-center gap-3 border-b border-cyan-300/10 px-4 py-4">
+              <button
+                type="button"
+                onClick={() => setMobileSidebarOpen(false)}
+                aria-label={t("common.closeSidebar")}
+                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-cyan-300/25 bg-cyan-300/10 text-cyan-200 shadow-[0_0_28px_rgba(57,208,200,0.08)] transition hover:border-cyan-200/45 hover:bg-cyan-300/15"
+              >
+                <Shield size={16} />
+              </button>
+              <div className="min-w-0">
+                <span className="block text-sm font-bold tracking-wide text-slate-50">Melonela</span>
+                <span className="block text-[10px] font-mono uppercase tracking-widest text-slate-500">{t("shell.socLayer")}</span>
+              </div>
+              <span className="ml-auto rounded border border-cyan-300/20 bg-cyan-300/10 px-1.5 py-0.5 font-mono text-[9px] text-cyan-200">SIEM</span>
+            </div>
+
+            <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
+              {navItems.map(({ id, icon: Icon }) => {
+                const on = active === id;
+                const label = t(NAV_I18N_KEYS[id]);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => handleNav(id, true)}
+                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-150 ${
+                      on ? "bg-cyan-300/10 text-cyan-100 font-medium shadow-[inset_2px_0_0_rgba(57,208,200,0.7)]" : "text-slate-500 hover:bg-white/[0.045] hover:text-slate-200"
+                    }`}
+                  >
+                    <Icon size={15} className="flex-shrink-0" />
+                    <span className="truncate">{label}</span>
+                    {on && <ChevronRight size={11} className="ml-auto flex-shrink-0 text-cyan-200" />}
+                  </button>
+                );
+              })}
+            </nav>
+
+            <div className="border-t border-border p-4">
+              <div className="mb-3 flex items-center gap-3 rounded-xl bg-white/[0.035] p-2">
+                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-300 to-teal-700 text-xs font-bold text-slate-950">{initials}</div>
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-semibold text-zinc-100">{username}</p>
+                  <p className="truncate text-[10px] text-zinc-500">{role}</p>
+                </div>
+              </div>
+              <div className="space-y-1">
+                {profileItems.map(({ label, icon: Icon, nav }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => nav && handleNav(nav, true)}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs font-medium text-zinc-400 transition hover:bg-cyan-400/[0.08] hover:text-zinc-100"
+                  >
+                    <Icon size={14} className="flex-shrink-0 text-zinc-500" />
+                    <span className="truncate">{label}</span>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={onLogout}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-red-300/85 transition hover:bg-red-500/10 hover:text-red-200"
+                >
+                  <LogOut size={14} className="flex-shrink-0 text-red-300/75" />
+                  <span>{t("common.logout")}</span>
+                </button>
+              </div>
+            </div>
+          </aside>
+        </div>
+      )}
 
       {/* Sidebar */}
-      <aside className="hidden w-64 flex-shrink-0 flex-col border-r border-cyan-300/10 bg-[#070d11] md:flex">
-        <div className="flex items-center gap-3 border-b border-cyan-300/10 px-5 py-4">
-          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-cyan-300/25 bg-cyan-300/10 shadow-[0_0_28px_rgba(57,208,200,0.08)]">
-            <Shield size={16} className="text-cyan-200" />
+      <aside className={`hidden flex-shrink-0 flex-col overflow-hidden border-r border-cyan-300/10 bg-[#070d11] transition-[width] duration-300 ease-out md:flex ${sidebarExpanded ? "w-64" : "w-[4.75rem]"}`}>
+        <div className={`flex items-center border-b border-cyan-300/10 py-4 transition-all duration-300 ${sidebarExpanded ? "gap-3 px-5" : "justify-center px-3"}`}>
+          <button
+            type="button"
+            onClick={() => {
+              if (sidebarExpanded) setProfileMenuOpen(false);
+              setSidebarExpanded((expanded) => !expanded);
+            }}
+            aria-label={sidebarExpanded ? t("common.hideSidebar") : t("common.showSidebar")}
+            aria-expanded={sidebarExpanded}
+            title={sidebarExpanded ? t("common.hideSidebar") : t("common.showSidebar")}
+            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-cyan-300/25 bg-cyan-300/10 text-cyan-200 shadow-[0_0_28px_rgba(57,208,200,0.08)] transition hover:border-cyan-200/45 hover:bg-cyan-300/15"
+          >
+            <Shield size={16} />
+          </button>
+          <div className={`min-w-0 overflow-hidden transition-all duration-300 ${sidebarExpanded ? "w-32 opacity-100" : "w-0 opacity-0"}`}>
+            <span className="block whitespace-nowrap text-sm font-bold tracking-wide text-slate-50">Melonela</span>
+            <span className="block whitespace-nowrap text-[10px] font-mono uppercase tracking-widest text-slate-500">{t("shell.socLayer")}</span>
           </div>
-          <div className="min-w-0">
-            <span className="block text-sm font-bold tracking-wide text-slate-50">Melonela</span>
-            <span className="block text-[10px] font-mono uppercase tracking-widest text-slate-500">SOC command layer</span>
-          </div>
-          <span className="ml-auto rounded border border-cyan-300/20 bg-cyan-300/10 px-1.5 py-0.5 font-mono text-[9px] text-cyan-200">SIEM</span>
+          <span className={`ml-auto rounded border border-cyan-300/20 bg-cyan-300/10 px-1.5 py-0.5 font-mono text-[9px] text-cyan-200 transition-all duration-300 ${sidebarExpanded ? "opacity-100" : "pointer-events-none w-0 overflow-hidden border-0 px-0 opacity-0"}`}>SIEM</span>
         </div>
         <nav className="flex-1 space-y-1 px-3 py-4">
-          {navItems.map(({ id, icon: Icon, label }) => {
+          {navItems.map(({ id, icon: Icon }) => {
             const on = active === id;
+            const label = t(NAV_I18N_KEYS[id]);
             return (
-              <button key={id} onClick={() => onNav(id)}
-                className={`w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-150 ${on ? "bg-cyan-300/10 text-cyan-100 font-medium shadow-[inset_2px_0_0_rgba(57,208,200,0.7)]" : "text-slate-500 hover:bg-white/[0.045] hover:text-slate-200"}`}>
-                <Icon size={15} />
-                {label}
-                {on && <ChevronRight size={11} className="ml-auto text-cyan-200" />}
+              <button
+                key={id}
+                type="button"
+                onClick={() => handleNav(id)}
+                title={!sidebarExpanded ? label : undefined}
+                className={`flex w-full items-center rounded-lg py-2.5 text-sm transition-all duration-150 ${
+                  sidebarExpanded ? "gap-3 px-3" : "justify-center px-0"
+                } ${on ? "bg-cyan-300/10 text-cyan-100 font-medium shadow-[inset_2px_0_0_rgba(57,208,200,0.7)]" : "text-slate-500 hover:bg-white/[0.045] hover:text-slate-200"}`}
+              >
+                <Icon size={15} className="flex-shrink-0" />
+                <span className={`overflow-hidden whitespace-nowrap text-left transition-all duration-300 ${sidebarExpanded ? "w-40 opacity-100" : "w-0 opacity-0"}`}>
+                  {label}
+                </span>
+                {on && sidebarExpanded && <ChevronRight size={11} className="ml-auto flex-shrink-0 text-cyan-200" />}
               </button>
             );
           })}
         </nav>
-        <div className="relative border-t border-border p-4">
+        <div className={`relative border-t border-border transition-all duration-300 ${sidebarExpanded ? "p-4" : "p-3"}`}>
           {profileMenuOpen && (
             <div className="absolute bottom-[76px] left-3 z-50 w-[260px] rounded-xl border border-zinc-700/70 bg-[#0c0c0e]/95 p-2 shadow-[0_24px_80px_rgba(0,0,0,0.72)] ring-1 ring-white/[0.06] backdrop-blur-xl transition duration-150">
               <div className="px-3 py-2.5">
@@ -385,7 +539,7 @@ function Shell({
                 className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-red-300/85 transition hover:bg-red-500/10 hover:text-red-200 hover:shadow-[inset_2px_0_0_rgba(248,113,113,0.45)]"
               >
                 <LogOut size={14} className="text-red-300/75" />
-                <span>Se déconnecter</span>
+                <span>{t("common.logout")}</span>
               </button>
 
               <span className="absolute -bottom-1.5 left-7 h-3 w-3 rotate-45 border-b border-r border-zinc-700/70 bg-[#0c0c0e]/95" />
@@ -395,23 +549,28 @@ function Shell({
           <button
             type="button"
             onClick={() => setProfileMenuOpen((open) => !open)}
-            className={`flex w-full items-center gap-3 rounded-xl p-2 text-left ring-1 ring-transparent transition ${
+            title={!sidebarExpanded ? `${username} (${role})` : undefined}
+            className={`flex w-full items-center rounded-xl p-2 text-left ring-1 ring-transparent transition ${
+              sidebarExpanded ? "gap-3" : "justify-center"
+            } ${
               profileMenuOpen ? "bg-white/[0.06] ring-white/[0.06]" : "hover:bg-white/[0.045] hover:ring-white/[0.06]"
             }`}
             aria-expanded={profileMenuOpen}
             aria-haspopup="menu"
           >
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-300 to-teal-700 flex items-center justify-center text-xs font-bold text-slate-950 flex-shrink-0">{initials}</div>
-            <div className="min-w-0">
+            <div className={`min-w-0 overflow-hidden transition-all duration-300 ${sidebarExpanded ? "w-32 opacity-100" : "w-0 opacity-0"}`}>
               <p className="truncate text-xs font-semibold text-zinc-100">{username}</p>
               <p className="truncate text-[10px] text-zinc-500">{role}</p>
             </div>
-            <ChevronUp
-              size={13}
-              className={`ml-auto flex-shrink-0 text-zinc-600 transition-transform ${
-                profileMenuOpen ? "text-zinc-300" : "rotate-180"
-              }`}
-            />
+            {sidebarExpanded && (
+              <ChevronUp
+                size={13}
+                className={`ml-auto flex-shrink-0 text-zinc-600 transition-transform ${
+                  profileMenuOpen ? "text-zinc-300" : "rotate-180"
+                }`}
+              />
+            )}
           </button>
         </div>
       </aside>
@@ -419,20 +578,39 @@ function Shell({
       {/* Main column */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="flex-shrink-0 flex flex-wrap items-center gap-3 border-b border-cyan-300/10 bg-[#081014] px-4 py-3 md:flex-nowrap md:gap-4 md:px-6">
+          <button
+            type="button"
+            onClick={() => setMobileSidebarOpen((open) => !open)}
+            aria-label={mobileSidebarOpen ? t("common.hideSidebar") : t("common.showSidebar")}
+            aria-expanded={mobileSidebarOpen}
+            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-cyan-300/25 bg-cyan-300/10 text-cyan-200 transition hover:border-cyan-200/45 hover:bg-cyan-300/15 md:hidden"
+          >
+            <Shield size={16} />
+          </button>
           <div className="min-w-0">
-            <h1 className="whitespace-nowrap text-sm font-bold text-slate-50">Security Overview</h1>
-            <p className="hidden text-[10px] font-mono uppercase tracking-widest text-slate-600 sm:block">Live telemetry and operational audit</p>
+            <h1 className="whitespace-nowrap text-sm font-bold text-slate-50">{t(NAV_I18N_KEYS[active])}</h1>
+            <p className="hidden text-[10px] font-mono uppercase tracking-widest text-slate-600 sm:block">{t("shell.subtitle")}</p>
           </div>
           <div className="order-3 w-full flex-1 relative md:order-none md:max-w-lg">
             <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
-            <input type="text" placeholder="Rechercher une IP, un utilisateur, un service..."
+            <input type="text" placeholder={t("common.searchPlaceholder")}
               className="w-full bg-muted border border-border rounded-lg pl-8 pr-4 py-2 text-xs placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 transition-all" />
           </div>
           <div className="ml-auto flex items-center gap-4">
             <div className="hidden items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-1.5 lg:flex">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-[11px] font-medium text-emerald-400 whitespace-nowrap">Ingestion node: online</span>
+              <span className="text-[11px] font-medium text-emerald-400 whitespace-nowrap">{t("shell.ingestionOnline")}</span>
             </div>
+            <button
+              type="button"
+              onClick={toggleLanguage}
+              title={t("common.switchLanguage")}
+              aria-label={t("common.switchLanguage")}
+              className="flex items-center gap-1.5 rounded-lg border border-zinc-800 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-400 transition hover:border-cyan-500/40 hover:bg-cyan-500/10 hover:text-cyan-200"
+            >
+              <Languages size={13} />
+              <span>{i18n.language === "fr" ? "EN" : "FR"}</span>
+            </button>
             <button className="relative text-zinc-500 hover:text-zinc-200 transition-colors">
               <Bell size={17} />
               <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 rounded-full text-[8px] font-bold text-white flex items-center justify-center">3</span>
@@ -441,17 +619,18 @@ function Shell({
             <button
               type="button"
               onClick={onLogout}
-              title="Déconnexion"
+              title={t("common.logout")}
               className="flex items-center gap-1.5 rounded-lg border border-zinc-800 px-2.5 py-1.5 text-[11px] font-medium text-zinc-500 transition hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-300"
             >
               <LogOut size={13} />
-              <span className="hidden sm:inline">Déconnexion</span>
+              <span className="hidden sm:inline">{t("common.logout")}</span>
             </button>
           </div>
         </header>
         <nav className="flex flex-shrink-0 gap-2 overflow-x-auto border-b border-cyan-300/10 bg-[#071014] px-3 py-2 md:hidden">
-          {navItems.map(({ id, icon: Icon, label }) => {
+          {navItems.map(({ id, icon: Icon }) => {
             const on = active === id;
+            const label = t(NAV_I18N_KEYS[id]);
             return (
               <button
                 key={id}
@@ -476,32 +655,42 @@ function Shell({
 
 function DashboardView({
   logs,
+  hourlyStats,
   loading,
   error,
   playing,
   setPlaying,
 }: {
   logs: AuditLog[];
+  hourlyStats: AuditLogHourlyStatsPoint[];
   loading: boolean;
   error: string | null;
   playing: boolean;
   setPlaying: (v: boolean | ((p: boolean) => boolean)) => void;
 }) {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language === "en" ? "en-US" : "fr-FR";
   const [expanded, setExpanded] = useState<number | null>(null);
-  const areaData = useMemo(() => buildHourlyData(logs), [logs]);
-  const donutData = useMemo(() => buildSeverityData(logs), [logs]);
+  const areaData = useMemo(() => buildHourlyData(hourlyStats), [hourlyStats]);
+  const donutData = useMemo(() => buildSeverityData(hourlyStats), [hourlyStats]);
   const total = donutData.reduce((s, d) => s + d.value, 0);
-  const criticalCount = logs.filter((log) => severityForLog(log) === "CRITIQUE").length;
-  const warningCount = logs.filter((log) => severityForLog(log) === "AVERTISSEMENT").length;
+  const warningCount = donutData[1]?.value ?? 0;
+  const criticalCount = donutData[2]?.value ?? 0;
   const activeSources = new Set(logs.map((log) => log.sourceName)).size;
+  const severityLabel = (name: string) => {
+    if (name === "Info") return t("severity.info");
+    if (name === "Avertissement") return t("severity.warning");
+    if (name === "Critique") return t("severity.critical");
+    return name;
+  };
 
   return (
     <main className="flex-1 overflow-y-auto px-6 py-5 space-y-4" style={{ scrollbarWidth: "none" } as React.CSSProperties}>
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard title="Événements ingérés" value={String(total)} icon={BarChart2} bg="bg-cyan-500" sub="Fenêtre active PostgreSQL" />
-        <KpiCard title="Signaux High" value={String(warningCount)} icon={XCircle} bg="bg-amber-500" vc="text-amber-400" sub="Sévérité medium" />
-        <KpiCard title="Critiques SOC" value={String(criticalCount)} icon={AlertTriangle} bg="bg-red-600" vc="text-red-400" sub="High ou critical" />
-        <KpiCard title="Sources observées" value={String(activeSources)} icon={Server} bg="bg-slate-600" sub="Machines et services" />
+        <KpiCard title={t("dashboard.ingestedEvents")} value={String(total)} icon={BarChart2} bg="bg-cyan-500" sub={t("dashboard.last24h")} />
+        <KpiCard title={t("dashboard.highSignals")} value={String(warningCount)} icon={XCircle} bg="bg-amber-500" vc="text-amber-400" sub={t("dashboard.medium24h")} />
+        <KpiCard title={t("dashboard.criticalSoc")} value={String(criticalCount)} icon={AlertTriangle} bg="bg-red-600" vc="text-red-400" sub={t("dashboard.highCritical24h")} />
+        <KpiCard title={t("dashboard.observedSources")} value={String(activeSources)} icon={Server} bg="bg-slate-600" sub={t("dashboard.machinesServices")} />
       </section>
 
       {error && (
@@ -513,9 +702,9 @@ function DashboardView({
       <section className="grid grid-cols-3 gap-4">
         <div className="col-span-2 bg-card border border-border rounded-lg p-5">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold">Volume des logs (24h)</h2>
+            <h2 className="text-sm font-semibold">{t("dashboard.logVolume24h")}</h2>
             <div className="flex items-center gap-4">
-              {([["Info", C.info], ["Avertissement", C.warn], ["Critique", C.crit]] as const).map(([l, col]) => (
+              {([[t("severity.info"), C.info], [t("severity.warning"), C.warn], [t("severity.critical"), C.crit]] as const).map(([l, col]) => (
                 <span key={l} className="flex items-center gap-1.5 text-[11px] text-zinc-500">
                   <span className="w-2 h-2 rounded-full" style={{ backgroundColor: col }} />{l}
                 </span>
@@ -536,15 +725,15 @@ function DashboardView({
               <XAxis dataKey="h"  tick={{ fill: "#52525b", fontSize: 10 }} tickLine={false} axisLine={false} interval={3} />
               <YAxis              tick={{ fill: "#52525b", fontSize: 10 }} tickLine={false} axisLine={false} />
               <Tooltip content={<ChartTip />} />
-              <Area type="monotone" dataKey="i" name="Info"          stroke={C.info} strokeWidth={1.5} fill="url(#gi)" dot={false} />
-              <Area type="monotone" dataKey="a" name="Avertissement" stroke={C.warn} strokeWidth={1.5} fill="url(#gw)" dot={false} />
-              <Area type="monotone" dataKey="c" name="Critique"      stroke={C.crit} strokeWidth={1.5} fill="url(#gc)" dot={false} />
+              <Area type="monotone" dataKey="i" name={t("severity.info")} stroke={C.info} strokeWidth={1.5} fill="url(#gi)" dot={false} />
+              <Area type="monotone" dataKey="a" name={t("severity.warning")} stroke={C.warn} strokeWidth={1.5} fill="url(#gw)" dot={false} />
+              <Area type="monotone" dataKey="c" name={t("severity.critical")} stroke={C.crit} strokeWidth={1.5} fill="url(#gc)" dot={false} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
 
         <div className="bg-card border border-border rounded-lg p-5 flex flex-col">
-          <h2 className="text-sm font-semibold mb-3">Répartition par Sévérité</h2>
+          <h2 className="text-sm font-semibold mb-3">{t("dashboard.severityBreakdown")}</h2>
           <div className="relative mx-auto h-44 w-44 flex-shrink-0">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -577,17 +766,17 @@ function DashboardView({
               </PieChart>
             </ResponsiveContainer>
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-base font-bold font-mono">{total.toLocaleString("fr-FR")}</span>
-              <span className="text-[10px] text-zinc-600">événements</span>
+              <span className="text-base font-bold font-mono">{total.toLocaleString(locale)}</span>
+              <span className="text-[10px] text-zinc-600">{t("dashboard.events")}</span>
             </div>
           </div>
           <div className="mt-3 space-y-2.5">
             {donutData.map((d) => (
               <div key={d.name} className="flex items-center justify-between text-xs">
                 <span className="flex items-center gap-2 text-zinc-400">
-                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />{d.name}
+                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />{severityLabel(d.name)}
                 </span>
-                <span className="font-mono text-zinc-300">{d.value.toLocaleString("fr-FR")}</span>
+                <span className="font-mono text-zinc-300">{d.value.toLocaleString(locale)}</span>
               </div>
             ))}
           </div>
@@ -598,36 +787,36 @@ function DashboardView({
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
           <div className="flex items-center gap-2">
             <Activity size={14} className="text-cyan-300" />
-            <h2 className="text-sm font-semibold">Event Stream système</h2>
+            <h2 className="text-sm font-semibold">{t("dashboard.systemStream")}</h2>
             {playing && <><span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse ml-2" /><span className="text-[10px] font-mono text-red-400 font-semibold">LIVE</span></>}
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setPlaying((p) => !p)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${playing ? "bg-red-500/10 border-red-500/25 text-red-400 hover:bg-red-500/20" : "bg-emerald-500/10 border-emerald-500/25 text-emerald-400 hover:bg-emerald-500/20"}`}>
-              {playing ? <Pause size={11} /> : <Play size={11} />}{playing ? "Pause" : "Reprendre"}
+              {playing ? <Pause size={11} /> : <Play size={11} />}{playing ? t("live.pause") : t("live.resume")}
             </button>
             <button
               onClick={() => void trackUserAction("REPORT_EXPORTED", "Dashboard audit", { source: "dashboard-summary" })}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-500/10 border border-cyan-500/25 text-cyan-300 hover:bg-cyan-500/20 transition-all"
             >
-              <Download size={11} />Exporter
+              <Download size={11} />{t("live.export")}
             </button>
           </div>
         </div>
         <div className="grid gap-2 px-5 py-2.5 border-b border-border bg-muted/40 text-[10px] font-semibold text-zinc-600 uppercase tracking-wider"
           style={{ gridTemplateColumns: "90px 155px 115px 1fr 145px 125px 32px" }}>
-          <span>Heure</span><span>Service</span><span>Utilisateur</span><span>Message</span><span>Dangerosité</span><span>Commande</span><span />
+          <span>{t("dashboard.time")}</span><span>{t("dashboard.service")}</span><span>{t("dashboard.user")}</span><span>{t("dashboard.message")}</span><span>{t("dashboard.danger")}</span><span>{t("dashboard.command")}</span><span />
         </div>
         <div className="overflow-y-auto max-h-64" style={{ scrollbarWidth: "none" } as React.CSSProperties}>
           {loading ? (
             <div className="flex h-40 flex-col items-center justify-center text-zinc-500">
               <Loader2 size={24} className="mb-2 animate-spin opacity-60" />
-              <p className="text-xs font-mono">Chargement des logs PostgreSQL...</p>
+              <p className="text-xs font-mono">{t("dashboard.loadingLogs")}</p>
             </div>
           ) : logs.length === 0 ? (
             <div className="flex h-40 flex-col items-center justify-center text-zinc-500">
               <Terminal size={28} className="mb-2 opacity-20" />
-              <p className="text-xs font-mono">Aucun log d'audit disponible</p>
+              <p className="text-xs font-mono">{t("dashboard.noAuditLogs")}</p>
             </div>
           ) : logs.map((log, idx) => {
             const severity = severityForLog(log);
@@ -658,8 +847,8 @@ function DashboardView({
           )})}
         </div>
         <div className="px-5 py-2 flex items-center justify-between border-t border-border bg-muted/20">
-          <span className="text-xs font-mono text-zinc-500">{logs.length} entrée(s) affichée(s)</span>
-          <span className="text-xs font-mono text-zinc-500">Màj: {new Date().toLocaleTimeString("fr-FR")}</span>
+          <span className="text-xs font-mono text-zinc-500">{t("dashboard.entriesShown", { count: logs.length })}</span>
+          <span className="text-xs font-mono text-zinc-500">{t("dashboard.updatedAt")} {new Date().toLocaleTimeString(locale)}</span>
         </div>
       </section>
     </main>
@@ -668,7 +857,7 @@ function DashboardView({
 
 // ── Historique Live view ───────────────────────────────────────────────────────
 
-const COL = "44px 104px 108px 118px 116px 170px 1fr 96px 36px";
+const COL = "40px 88px minmax(78px,94px) minmax(74px,92px) minmax(64px,78px) minmax(96px,128px) minmax(420px,1fr) 32px";
 
 function HistoriqueLiveView({
   logs,
@@ -697,14 +886,12 @@ function HistoriqueLiveView({
   journalctlStatus: JournalctlLiveStatus | null;
   journalctlBusy: boolean;
 }) {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language === "en" ? "en-US" : "fr-FR";
   const [expanded, setExpanded] = useState<number | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [blink, setBlink]           = useState(true);
-  const [search, setSearch] = useState(query.search ?? "");
   const [severity, setSeverity] = useState(query.severity ?? "");
-  const [humanSeverity, setHumanSeverity] = useState(query.human_severity ?? "");
-  const [category, setCategory] = useState(query.category ?? "");
-  const [eventType, setEventType] = useState(query.event_type ?? "");
   const [service, setService] = useState(query.service ?? "");
   const [username, setUsername] = useState(query.username ?? "");
   const [command, setCommand] = useState(query.command ?? "");
@@ -729,15 +916,11 @@ function HistoriqueLiveView({
   const hasFilter = Boolean(query.search || query.severity || query.human_severity || query.category || query.event_type || query.service || query.username || query.command || query.date_from || query.date_to);
 
   const applyFilters = () => {
-    onQueryChange({ search, severity, human_severity: humanSeverity, category, event_type: eventType, service, username, command, date_from: dateFrom, date_to: dateTo, page: 1 });
+    onQueryChange({ search: "", severity, human_severity: "", category: "", event_type: "", service, username, command, date_from: dateFrom, date_to: dateTo, page: 1 });
   };
 
   const resetFilters = () => {
-    setSearch("");
     setSeverity("");
-    setHumanSeverity("");
-    setCategory("");
-    setEventType("");
     setService("");
     setUsername("");
     setCommand("");
@@ -755,7 +938,7 @@ function HistoriqueLiveView({
           <div className="w-7 h-7 rounded-lg bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center">
             <Terminal size={14} className="text-cyan-300" />
           </div>
-          <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Event Stream temps réel</h2>
+          <h2 className="text-lg font-semibold tracking-tight text-zinc-100">{t("live.title")}</h2>
         </div>
 
         <div className="w-px h-5 bg-border flex-shrink-0" />
@@ -768,20 +951,20 @@ function HistoriqueLiveView({
               : "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
           }`}>
           {playing ? <Pause size={12} /> : <Play size={12} />}
-          {playing ? "Pause" : "Reprendre"}
+          {playing ? t("live.pause") : t("live.resume")}
         </button>
 
         {/* EN DIRECT pill */}
         <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600/10 border border-red-600/25">
           <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0 transition-opacity duration-300"
             style={{ opacity: playing && blink ? 1 : 0.15 }} />
-          <span className="text-[11px] font-mono font-bold text-red-400 tracking-[0.15em]">EN DIRECT</span>
+          <span className="text-[11px] font-mono font-bold text-red-400 tracking-[0.15em]">{t("live.live")}</span>
         </div>
 
         {/* Vider */}
         <button onClick={onClear}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 transition-all">
-          <Trash2 size={12} />Nettoyer la vue
+          <Trash2 size={12} />{t("live.clearView")}
         </button>
 
         <div className="ml-auto flex items-center gap-2">
@@ -791,92 +974,61 @@ function HistoriqueLiveView({
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600/10 border border-emerald-600/25 text-emerald-400 hover:bg-emerald-600/20 disabled:opacity-50 transition-all"
           >
             {journalctlBusy ? <Loader2 size={12} className="animate-spin" /> : <RotateCw size={12} />}
-            {journalctlStatus?.running ? "Arrêter journalctl live" : "Démarrer journalctl live"}
+            {journalctlStatus?.running ? t("live.stopJournalctl") : t("live.startJournalctl")}
           </button>
           <button
             onClick={() => void trackUserAction("REPORT_EXPORTED", "Historique Live", { source: "live-feed" })}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-500/10 border border-cyan-500/25 text-cyan-300 hover:bg-cyan-500/20 transition-all"
           >
-            <Download size={12} />Exporter
+            <Download size={12} />{t("live.export")}
           </button>
         </div>
       </div>
 
       {/* ── Filter bar ── */}
-      <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 bg-card border border-border rounded-lg flex-shrink-0">
+      <div className="flex flex-wrap items-center gap-2.5 px-4 py-2.5 bg-card border border-border rounded-lg flex-shrink-0">
         <Filter size={13} className="text-zinc-600 flex-shrink-0" />
-        <span className="text-[11px] text-zinc-500 font-medium whitespace-nowrap">Filtres :</span>
+        <span className="text-[11px] text-zinc-500 font-medium whitespace-nowrap">{t("live.filters")}</span>
 
-        <div className="relative min-w-0 flex-1 max-w-[220px]">
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/50"
-            placeholder="Recherche texte" />
-        </div>
-
-        <div className="relative min-w-0 flex-1 max-w-[150px]">
+        <div className="relative min-w-[150px] flex-1 sm:max-w-[180px]">
           <select value={severity} onChange={(e) => setSeverity(e.target.value)}
             className="w-full appearance-none bg-muted border border-border rounded-lg pl-3 pr-7 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500/50 cursor-pointer">
-            <option value="">Toutes sévérités</option>
+            <option value="">{t("live.allSeverities")}</option>
             <option value="low">Low</option>
             <option value="medium">Medium</option>
             <option value="high">High</option>
             <option value="critical">Critical</option>
-          </select>
-          <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
-        </div>
-
-        <div className="relative min-w-0 flex-1 max-w-[150px]">
-          <select value={humanSeverity} onChange={(e) => setHumanSeverity(e.target.value)}
-            className="w-full appearance-none bg-muted border border-border rounded-lg pl-3 pr-7 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500/50 cursor-pointer">
-            <option value="">Gravité humaine</option>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-            <option value="critical">Critical</option>
-          </select>
-          <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
-        </div>
-
-        <input value={category} onChange={(e) => setCategory(e.target.value)}
-          className="w-28 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/50"
-          placeholder="Catégorie" />
-
-        <div className="relative min-w-0 flex-1 max-w-[180px]">
-          <select value={eventType} onChange={(e) => setEventType(e.target.value)}
-            className="w-full appearance-none bg-muted border border-border rounded-lg pl-3 pr-7 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500/50 cursor-pointer">
-            <option value="">Tous les types</option>
-            {EVENT_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
           <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
         </div>
 
         <input value={service} onChange={(e) => setService(e.target.value)}
-          className="w-28 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/50"
-          placeholder="Service" />
+          className="min-w-[130px] flex-1 sm:max-w-[180px] bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/50"
+          placeholder={t("live.service")} />
 
         <input value={username} onChange={(e) => setUsername(e.target.value)}
-          className="w-28 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/50"
-          placeholder="Utilisateur" />
+          className="min-w-[130px] flex-1 sm:max-w-[180px] bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/50"
+          placeholder={t("live.user")} />
 
         <input value={command} onChange={(e) => setCommand(e.target.value)}
-          className="w-36 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/50"
-          placeholder="Commande" />
+          className="min-w-[150px] flex-1 sm:max-w-[220px] bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/50"
+          placeholder={t("live.command")} />
 
         <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-          className="bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500/50 [color-scheme:dark]" />
+          className="min-w-[140px] flex-1 sm:max-w-[160px] bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500/50 [color-scheme:dark]" />
 
         <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-          className="bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500/50 [color-scheme:dark]" />
+          className="min-w-[140px] flex-1 sm:max-w-[160px] bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500/50 [color-scheme:dark]" />
 
         <button onClick={applyFilters}
-          className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-300 hover:bg-cyan-500/20">
-          Appliquer
+          className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-300 hover:bg-cyan-500/20 flex-shrink-0">
+          {t("live.apply")}
         </button>
 
         {hasFilter && (
           <button onClick={resetFilters}
             className="text-xs font-mono text-zinc-500 hover:text-zinc-400 transition-colors whitespace-nowrap">
-            Réinitialiser
+            {t("live.reset")}
           </button>
         )}
 
@@ -892,16 +1044,15 @@ function HistoriqueLiveView({
       <div className="flex-1 bg-card border border-border rounded-lg overflow-hidden flex flex-col min-h-0">
 
         {/* Column headers */}
-        <div className="grid gap-2 px-4 py-2.5 border-b border-border bg-[#0d0d10] text-[10px] font-semibold text-zinc-600 uppercase tracking-widest flex-shrink-0"
+        <div className="grid gap-2 px-3 py-2.5 border-b border-border bg-[#0d0d10] text-[10px] font-semibold text-zinc-600 uppercase tracking-widest flex-shrink-0"
           style={{ gridTemplateColumns: COL }}>
           <span className="flex items-center gap-1"><Hash size={9} />ID</span>
-          <span>Date</span>
-          <span>Service</span>
-          <span>Utilisateur</span>
+          <span>{t("live.date")}</span>
+          <span>{t("live.service")}</span>
+          <span>{t("live.user")}</span>
           <span>PWD</span>
-          <span>Commande</span>
-          <span>Interprétation</span>
-          <span>Cible</span>
+          <span>{t("live.command")}</span>
+          <span>{t("live.interpretation")}</span>
           <span />
         </div>
 
@@ -912,7 +1063,7 @@ function HistoriqueLiveView({
           {loading ? (
             <div className="flex flex-col items-center justify-center h-40 text-zinc-500">
               <Loader2 size={28} className="mb-2 animate-spin opacity-50" />
-              <p className="text-xs font-mono">Chargement des logs PostgreSQL</p>
+              <p className="text-xs font-mono">{t("live.loadingLogs")}</p>
             </div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center h-40 text-red-400">
@@ -922,7 +1073,7 @@ function HistoriqueLiveView({
           ) : logs.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-zinc-500">
               <Terminal size={28} className="mb-2 opacity-20" />
-              <p className="text-xs font-mono">Aucun événement correspondant aux filtres</p>
+              <p className="text-xs font-mono">{t("live.noMatchingEvents")}</p>
             </div>
           ) : logs.map((log, idx) => {
             const isOpen = expanded === log.id;
@@ -934,29 +1085,28 @@ function HistoriqueLiveView({
                 {/* Row */}
                 <button
                   onClick={() => setExpanded((p) => p === log.id ? null : log.id)}
-                  className={`w-full grid gap-2 px-4 py-[8px] text-left text-xs border-b border-border/30 transition-colors duration-75 group relative
+                  className={`w-full grid gap-2 px-3 py-[8px] text-left text-xs border-b border-border/30 transition-colors duration-75 group relative
                     ${idx % 2 === 0 ? "bg-card" : "bg-[#0f0f12]"}
                     ${isOpen ? "bg-cyan-500/[0.04]" : "hover:bg-cyan-400/[0.06] hover:shadow-[inset_2px_0_0_rgba(59,130,246,0.45)]"}`}
                   style={{ gridTemplateColumns: COL }}
                 >
                   {isNew && <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-emerald-400/70 animate-pulse" />}
 
-                  <span className="font-mono text-[10px] text-zinc-500 tabular-nums self-center">#{log.id}</span>
-                  <span className="font-mono text-[11px] text-zinc-500 tabular-nums self-center">{formatTime(log.eventTimestamp)}</span>
-                  <span className="font-mono text-[11px] text-zinc-400 truncate self-center">{log.service ?? log.sourceType}</span>
-                  <span className="text-[11px] text-zinc-300 flex items-center gap-1 truncate self-center">
+                  <span className="font-mono text-[10px] text-zinc-500 tabular-nums self-center truncate">#{log.id}</span>
+                  <span className="font-mono text-[10px] text-zinc-500 tabular-nums self-center">{formatTime(log.eventTimestamp)}</span>
+                  <span className="font-mono text-[10px] text-zinc-400 truncate self-center">{log.service ?? log.sourceType}</span>
+                  <span className="text-[10px] text-zinc-300 flex items-center gap-1 truncate self-center">
                     <Server size={9} className="text-zinc-500 flex-shrink-0" />{log.username ?? "-"}
                   </span>
-                  <span className="font-mono text-[11px] text-zinc-500 truncate self-center">{log.workingDirectory ?? "-"}</span>
-                  <span className="font-mono text-[11px] text-zinc-400 truncate self-center">{log.command ?? "-"}</span>
-                  <span className="min-w-0 self-center">
-                    <span className={`block truncate text-[11px] font-semibold ${SEV[severity].text}`}>
+                  <span className="font-mono text-[10px] text-zinc-500 truncate self-center">{log.workingDirectory ?? "-"}</span>
+                  <span className="font-mono text-[10px] text-zinc-400 truncate self-center">{log.command ?? "-"}</span>
+                  <span className="min-w-0 self-center border-l border-cyan-400/10 pl-3">
+                    <span className={`block truncate text-[12px] font-semibold leading-snug ${SEV[severity].text}`}>
                       {displayTitle(log)}
                       <span className="ml-2"><Badge level={severity} /></span>
                     </span>
-                    <span className="mt-0.5 block truncate text-[10px] text-zinc-500">{displayDescription(log)}</span>
+                    <span className="mt-0.5 block truncate text-[10px] leading-snug text-zinc-400/80">{displayDescription(log)}</span>
                   </span>
-                  <span className="font-mono text-[11px] text-zinc-500 self-center">{log.targetUser ?? "-"}</span>
                   <span className="flex items-center justify-center self-center">
                     <ChevronDown size={13} className={`text-zinc-500 group-hover:text-zinc-400 transition-transform duration-200 ${isOpen ? "rotate-180 text-cyan-300" : ""}`} />
                   </span>
@@ -971,7 +1121,7 @@ function HistoriqueLiveView({
                     <div className="flex items-center gap-3 mb-4">
                       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${SEV[severity].dot}`} />
                       <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">
-                        Détail de l'événement #{log.id} — {displayTitle(log)}
+                        {t("live.eventDetail", { id: log.id, title: displayTitle(log) })}
                       </span>
                       <div className="flex-1 h-px bg-zinc-800" />
                       <Badge level={severity} />
@@ -986,19 +1136,19 @@ function HistoriqueLiveView({
                         {([
                           ["Parser",      logParserName(log)],
                           ["Type",        eventLabel(log.eventType)],
-                          ["Catégorie",   log.category ?? "-"],
-                          ["Règle",       log.interpretationRuleId ?? "-"],
-                          ["Service",     log.service ?? "-"],
-                          ["Utilisateur", log.username ?? "-"],
+                          [t("live.category"),   log.category ?? "-"],
+                          [t("live.rule"),       log.interpretationRuleId ?? "-"],
+                          [t("live.service"),     log.service ?? "-"],
+                          [t("live.user"), log.username ?? "-"],
                           ["PWD",         log.workingDirectory ?? "-"],
-                          ["Cible",       log.targetUser ?? "-"],
-                          ["Commande",    log.command ?? "-"],
-                          ["Sévérité",    severity],
-                          ["Reçue",       formatTime(log.receivedAt)],
+                          [t("live.target"),       log.targetUser ?? "-"],
+                          [t("live.command"),    log.command ?? "-"],
+                          [t("live.severity"),    severity],
+                          [t("live.received"),       formatTime(log.receivedAt)],
                         ] as [string, string][]).map(([k, v]) => (
                           <div key={k}>
                             <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-0.5">{k}</p>
-                            <p className={`text-[11px] font-mono truncate ${k === "Sévérité" ? SEV[severity].text : "text-zinc-300"}`}>{String(v)}</p>
+                            <p className={`text-[11px] font-mono truncate ${k === t("live.severity") ? SEV[severity].text : "text-zinc-300"}`}>{String(v)}</p>
                           </div>
                         ))}
                       </div>
@@ -1056,25 +1206,25 @@ function HistoriqueLiveView({
         {/* ── Micro status line ── */}
         <div className="flex items-center gap-4 px-4 py-2 border-t border-border bg-[#0d0d10] flex-shrink-0">
           <span className="text-[10px] font-mono text-zinc-600">
-            Page <span className="text-zinc-400 font-semibold">{pagination.page}</span> / {pagination.totalPages} · {pagination.total} événement(s)
+            {t("live.pageStatus", { page: pagination.page, totalPages: pagination.totalPages, total: pagination.total })}
           </span>
           <span className="text-zinc-800 text-[10px]">—</span>
           <span className={`flex items-center gap-1.5 text-[10px] font-mono transition-colors ${autoScroll && playing ? "text-emerald-500/80" : "text-zinc-600"}`}>
             <span className={`w-1 h-1 rounded-full transition-colors ${autoScroll && playing ? "bg-emerald-500 animate-pulse" : "bg-zinc-700"}`} />
-            Défilement automatique {autoScroll && playing ? "actif" : "inactif"}
+            {t("live.autoScroll", { state: autoScroll && playing ? t("live.active") : t("live.inactive") })}
           </span>
           {hasFilter && (
             <>
               <span className="text-zinc-800 text-[10px]">—</span>
-              <span className="text-[10px] font-mono text-amber-500/70">Filtres appliqués</span>
+              <span className="text-[10px] font-mono text-amber-500/70">{t("live.filtersApplied")}</span>
             </>
           )}
           <span className="text-zinc-800 text-[10px]">—</span>
           <span className={`text-[10px] font-mono ${journalctlStatus?.running ? "text-emerald-500/80" : "text-zinc-600"}`}>
-            journalctl -f {journalctlStatus?.running ? "actif" : "arrêté"}
+            journalctl -f {journalctlStatus?.running ? t("live.active") : t("live.stopped")}
           </span>
           <span className="ml-auto text-[10px] font-mono text-zinc-500">
-            Màj: <span className="text-zinc-500">{new Date().toLocaleTimeString("fr-FR")}</span>
+            {t("dashboard.updatedAt")} <span className="text-zinc-500">{new Date().toLocaleTimeString(locale)}</span>
           </span>
           <button
             type="button"
@@ -1082,7 +1232,7 @@ function HistoriqueLiveView({
             onClick={() => onQueryChange({ page: Math.max(1, pagination.page - 1) })}
             className="rounded border border-zinc-800 px-2 py-1 text-[10px] text-zinc-500 disabled:opacity-40"
           >
-            Précédent
+            {t("live.previous")}
           </button>
           <button
             type="button"
@@ -1090,7 +1240,7 @@ function HistoriqueLiveView({
             onClick={() => onQueryChange({ page: pagination.page + 1 })}
             className="rounded border border-zinc-800 px-2 py-1 text-[10px] text-zinc-500 disabled:opacity-40"
           >
-            Suivant
+            {t("live.next")}
           </button>
         </div>
       </div>
@@ -1110,10 +1260,13 @@ interface Report {
   debut: string;
   fin: string;
   taille: string;
+  sizeBytes: number;
   statut: ReportStatus;
   genere: string;
   services: string[];
   severites: string[];
+  params: Record<string, string>;
+  error?: string;
 }
 
 const FORMAT_ICON_COLOR: Record<ReportFormat, { icon: string; bg: string; text: string }> = {
@@ -1129,6 +1282,91 @@ const STATUS_STYLE: Record<ReportStatus, { pill: string; dot: string; label: str
 };
 
 const SERVICES_LIST = ["Tous les services", "sshd.service", "systemd-logind", "sudo", "nginx", "auditd", "cron", "kernel", "firewalld", "fail2ban", "postgresql"];
+const REPORTS_STORAGE_KEY = "melonela:reports";
+
+function dateInputValue(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function defaultReportStartDate() {
+  const date = new Date();
+  date.setDate(date.getDate() - 7);
+  return dateInputValue(date);
+}
+
+function defaultReportEndDate() {
+  return dateInputValue(new Date());
+}
+
+function formatReportDate(value: string) {
+  if (!value) return "-";
+  return value.split("-").reverse().join("/");
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 o";
+  const units = ["o", "Ko", "Mo", "Go"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+}
+
+function normalizeReportBaseName(value: string) {
+  const normalized = value
+    .trim()
+    .replace(/\.[a-z0-9]+$/i, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  return normalized || `rapport_audit_${dateInputValue(new Date()).replace(/-/g, "")}`;
+}
+
+function uiSeverityQuery(severities: string[]) {
+  const map: Record<string, string> = {
+    CRITIQUE: "critical",
+    AVERTISSEMENT: "warning",
+    INFO: "info",
+  };
+
+  return severities.map((severity) => map[severity]).filter(Boolean).join(",");
+}
+
+function saveReportBlob(blob: Blob, report: Pick<Report, "nom" | "format">) {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${report.nom}.${report.format.toLowerCase()}`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+function loadStoredReports(): Report[] {
+  try {
+    const raw = window.localStorage.getItem(REPORTS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is Report => (
+      typeof item?.id === "number"
+      && typeof item?.nom === "string"
+      && ["PDF", "CSV", "JSON"].includes(item?.format)
+      && ["Prêt", "En cours", "Échec"].includes(item?.statut)
+      && typeof item?.params === "object"
+      && item?.params !== null
+    )).map((item) => item.statut === "En cours"
+      ? { ...item, statut: "Échec", error: "Génération interrompue avant la fin." }
+      : item
+    );
+  } catch {
+    return [];
+  }
+}
 
 function ReportSortButton({
   field,
@@ -1155,9 +1393,11 @@ function ReportSortButton({
 }
 
 function RapportsView() {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language === "en" ? "en-US" : "fr-FR";
   // Form state
-  const [dateDebut,   setDateDebut]   = useState("2026-06-01");
-  const [dateFin,     setDateFin]     = useState("2026-06-13");
+  const [dateDebut,   setDateDebut]   = useState(defaultReportStartDate);
+  const [dateFin,     setDateFin]     = useState(defaultReportEndDate);
   const [selService,  setSelService]  = useState("Tous les services");
   const [selFormat,   setSelFormat]   = useState<ReportFormat>("PDF");
   const [sevCritique, setSevCritique] = useState(true);
@@ -1166,46 +1406,139 @@ function RapportsView() {
   const [reportName,  setReportName]  = useState("rapport_audit_");
   const [generating,  setGenerating]  = useState(false);
   const [generated,   setGenerated]   = useState(false);
-  const [reports,     setReports]     = useState<Report[]>([]);
+  const [reports,     setReports]     = useState<Report[]>(loadStoredReports);
   const [sortField,   setSortField]   = useState<keyof Report>("id");
   const [sortAsc,     setSortAsc]     = useState(false);
   const [filterStatus, setFilterStatus] = useState<ReportStatus | "Tous">("Tous");
+  const [formError, setFormError] = useState("");
 
-  const handleGenerate = () => {
+  useEffect(() => {
+    window.localStorage.setItem(REPORTS_STORAGE_KEY, JSON.stringify(reports.slice(0, 100)));
+  }, [reports]);
+
+  const buildReportRequest = () => {
+    const sevs = [sevCritique && "CRITIQUE", sevAvert && "AVERTISSEMENT", sevInfo && "INFO"].filter(Boolean) as string[];
+    const filename = normalizeReportBaseName(reportName);
+    const params: Record<string, string> = {
+      filename,
+      date_from: dateDebut,
+      date_to: dateFin,
+      ui_severities: uiSeverityQuery(sevs),
+    };
+
+    if (selService !== "Tous les services") params.service = selService;
+
+    return { filename, params, sevs };
+  };
+
+  const handleGenerate = async () => {
     if (generating) return;
+    setFormError("");
+
+    if (!dateDebut || !dateFin) {
+      setFormError(t("reports.errors.incompletePeriod"));
+      return;
+    }
+
+    if (new Date(dateDebut) > new Date(dateFin)) {
+      setFormError(t("reports.errors.invalidPeriod"));
+      return;
+    }
+
+    const { filename, params, sevs } = buildReportRequest();
+    if (sevs.length === 0) {
+      setFormError(t("reports.errors.noSeverity"));
+      return;
+    }
+
     setGenerating(true);
     setGenerated(false);
-    setTimeout(() => {
-      const sevs = [sevCritique && "CRITIQUE", sevAvert && "AVERTISSEMENT", sevInfo && "INFO"].filter(Boolean) as string[];
-      const newReport: Report = {
-        id: reports.length + 1,
-        nom: reportName + new Date().toISOString().slice(0, 10).replace(/-/g, ""),
-        format: selFormat,
-        debut: dateDebut.split("-").reverse().join("/"),
-        fin:   dateFin.split("-").reverse().join("/"),
-        taille: selFormat === "JSON" ? "1.2 Mo" : selFormat === "PDF" ? "2.1 Mo" : "340 Ko",
-        statut: "Prêt",
-        genere: new Date().toLocaleDateString("fr-FR") + " à " + new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
-        services: [selService],
-        severites: sevs,
-      };
-      setReports((p) => [newReport, ...p]);
-      void trackUserAction("GENERATE_REPORT", newReport.nom, {
-        format: newReport.format,
-        service: selService,
-        severites: newReport.severites,
-        periode: { debut: dateDebut, fin: dateFin },
-      });
+
+    const pendingReport: Report = {
+      id: Date.now(),
+      nom: filename,
+      format: selFormat,
+      debut: formatReportDate(dateDebut),
+      fin: formatReportDate(dateFin),
+      taille: "-",
+      sizeBytes: 0,
+      statut: "En cours",
+      genere: new Date().toLocaleDateString(locale) + " " + new Date().toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" }),
+      services: [selService],
+      severites: sevs,
+      params,
+    };
+
+    setReports((previous) => [pendingReport, ...previous]);
+    void trackUserAction("GENERATE_REPORT", pendingReport.nom, {
+      format: pendingReport.format,
+      service: selService,
+      severites: pendingReport.severites,
+      periode: { debut: dateDebut, fin: dateFin },
+    });
+
+    try {
       const format = selFormat.toLowerCase() as "json" | "csv" | "pdf";
-      window.open(getExportUrl(format, {
-        startDate: dateDebut,
-        endDate: dateFin,
-        action: reportName,
-      }), "_blank", "noopener,noreferrer");
+      const blob = await fetchExportBlob(format, params);
+      saveReportBlob(blob, pendingReport);
+      setReports((previous) => previous.map((report) => report.id === pendingReport.id
+        ? { ...report, statut: "Prêt", taille: formatBytes(blob.size), sizeBytes: blob.size }
+        : report
+      ));
       setGenerating(false);
       setGenerated(true);
       setTimeout(() => setGenerated(false), 4000);
-    }, 2200);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("reports.errors.generationFailed");
+      setReports((previous) => previous.map((report) => report.id === pendingReport.id
+        ? { ...report, statut: "Échec", error: message }
+        : report
+      ));
+      setFormError(message);
+      setGenerating(false);
+    }
+  };
+
+  const handleDownloadReport = async (report: Report) => {
+    if (report.statut !== "Prêt") return;
+
+    try {
+      const format = report.format.toLowerCase() as "json" | "csv" | "pdf";
+      const blob = await fetchExportBlob(format, report.params);
+      saveReportBlob(blob, report);
+      setReports((previous) => previous.map((item) => item.id === report.id
+        ? { ...item, taille: formatBytes(blob.size), sizeBytes: blob.size }
+        : item
+      ));
+      void trackUserAction("REPORT_DOWNLOADED", `${report.nom}.${report.format.toLowerCase()}`, { reportId: report.id, format: report.format });
+    } catch (err) {
+      setReports((previous) => previous.map((item) => item.id === report.id
+        ? { ...item, statut: "Échec", error: err instanceof Error ? err.message : t("reports.errors.downloadFailed") }
+        : item
+      ));
+    }
+  };
+
+  const handleRetryReport = async (report: Report) => {
+    setReports((previous) => previous.map((item) => item.id === report.id
+      ? { ...item, statut: "En cours", error: undefined }
+      : item
+    ));
+
+    try {
+      const format = report.format.toLowerCase() as "json" | "csv" | "pdf";
+      const blob = await fetchExportBlob(format, report.params);
+      saveReportBlob(blob, report);
+      setReports((previous) => previous.map((item) => item.id === report.id
+        ? { ...item, statut: "Prêt", taille: formatBytes(blob.size), sizeBytes: blob.size, error: undefined }
+        : item
+      ));
+    } catch (err) {
+      setReports((previous) => previous.map((item) => item.id === report.id
+        ? { ...item, statut: "Échec", error: err instanceof Error ? err.message : t("reports.errors.generationFailed") }
+        : item
+      ));
+    }
   };
 
   const sorted = useMemo(() => {
@@ -1225,6 +1558,20 @@ function RapportsView() {
   const readyCnt   = reports.filter((r) => r.statut === "Prêt").length;
   const pendingCnt = reports.filter((r) => r.statut === "En cours").length;
   const failCnt    = reports.filter((r) => r.statut === "Échec").length;
+  const totalSize = reports.reduce((sum, report) => sum + report.sizeBytes, 0);
+  const lastReadyReport = reports.find((report) => report.statut === "Prêt");
+  const formatCounts = reports.reduce<Record<ReportFormat, number>>((counts, report) => {
+    counts[report.format] += 1;
+    return counts;
+  }, { PDF: 0, CSV: 0, JSON: 0 });
+  const mostUsedFormat = (Object.entries(formatCounts) as [ReportFormat, number][])
+    .sort((a, b) => b[1] - a[1])[0];
+  const statusLabel = (status: ReportStatus | "Tous") => {
+    if (status === "Tous") return t("reports.all");
+    if (status === "Prêt") return t("reports.ready");
+    if (status === "En cours") return t("reports.pending");
+    return t("reports.failed");
+  };
 
   return (
     <main
@@ -1238,9 +1585,9 @@ function RapportsView() {
             <FileDown size={15} className="text-indigo-400" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Génération de Rapports d'Audit</h2>
+            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">{t("reports.pageTitle")}</h2>
             <p className="text-[11px] text-zinc-600 font-mono mt-0.5">
-              {readyCnt} prêt{readyCnt > 1 ? "s" : ""} · {pendingCnt} en cours · {failCnt} en échec
+              {readyCnt} {readyCnt > 1 ? t("reports.readyPlural") : t("reports.ready")} · {pendingCnt} {t("reports.pending")} · {failCnt} {t("reports.failed")}
             </p>
           </div>
         </div>
@@ -1253,26 +1600,26 @@ function RapportsView() {
                   ? "bg-cyan-500/20 border-cyan-500/40 text-cyan-200"
                   : "border-zinc-800 text-zinc-600 hover:text-zinc-300 hover:border-zinc-700"
               }`}>
-              {s}
+              {statusLabel(s)}
             </button>
           ))}
         </div>
       </div>
 
       {/* ── Two-column layout ── */}
-      <div className="flex gap-5 items-start">
+      <div className="flex flex-col gap-5 items-start xl:flex-row">
 
         {/* ═══════════════════════════════════════════════════════════
             LEFT COLUMN — Form (1/3)
         ═══════════════════════════════════════════════════════════ */}
-        <aside className="w-80 flex-shrink-0 flex flex-col gap-4">
+        <aside className="flex w-full flex-shrink-0 flex-col gap-4 xl:w-80">
 
           {/* Form card */}
           <div className="bg-card border border-border rounded-lg overflow-hidden">
             {/* Card header */}
             <div className="flex items-center gap-2.5 px-5 py-4 border-b border-border bg-[#0d0d10]">
               <FileCog size={15} className="text-indigo-400" />
-              <h3 className="text-sm font-semibold">Nouveau Rapport Customisé</h3>
+              <h3 className="text-sm font-semibold">{t("reports.newReport")}</h3>
             </div>
 
             <div className="px-5 py-5 space-y-5">
@@ -1280,31 +1627,34 @@ function RapportsView() {
               {/* Nom du rapport */}
               <div>
                 <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest block mb-2">
-                  Nom du fichier
+                  {t("reports.fileName")}
                 </label>
                 <input
                   type="text"
                   value={reportName}
-                  onChange={(e) => setReportName(e.target.value)}
+                  onChange={(e) => {
+                    setReportName(e.target.value);
+                    setFormError("");
+                  }}
                   className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs font-mono text-foreground placeholder:text-zinc-500 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 transition-all"
-                  placeholder="rapport_audit_..."
+                  placeholder={t("reports.filePlaceholder")}
                 />
               </div>
 
               {/* Date range */}
               <div>
                 <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest block mb-2 flex items-center gap-1.5">
-                  <CalendarDays size={10} />Période couverte
+                  <CalendarDays size={10} />{t("reports.period")}
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <p className="text-[10px] text-zinc-500 mb-1 font-mono">Du</p>
-                    <input type="date" value={dateDebut} onChange={(e) => setDateDebut(e.target.value)}
+                    <p className="text-[10px] text-zinc-500 mb-1 font-mono">{t("reports.from")}</p>
+                    <input type="date" value={dateDebut} onChange={(e) => { setDateDebut(e.target.value); setFormError(""); }}
                       className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs font-mono text-zinc-300 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 transition-all [color-scheme:dark]" />
                   </div>
                   <div>
-                    <p className="text-[10px] text-zinc-500 mb-1 font-mono">Au</p>
-                    <input type="date" value={dateFin} onChange={(e) => setDateFin(e.target.value)}
+                    <p className="text-[10px] text-zinc-500 mb-1 font-mono">{t("reports.to")}</p>
+                    <input type="date" value={dateFin} onChange={(e) => { setDateFin(e.target.value); setFormError(""); }}
                       className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs font-mono text-zinc-300 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 transition-all [color-scheme:dark]" />
                   </div>
                 </div>
@@ -1312,11 +1662,11 @@ function RapportsView() {
 
               {/* Service */}
               <div>
-                <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest block mb-2">Service ciblé</label>
+                <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest block mb-2">{t("reports.service")}</label>
                 <div className="relative">
-                  <select value={selService} onChange={(e) => setSelService(e.target.value)}
+                  <select value={selService} onChange={(e) => { setSelService(e.target.value); setFormError(""); }}
                     className="w-full appearance-none bg-muted border border-border rounded-lg pl-3 pr-7 py-2 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500/50 cursor-pointer">
-                    {SERVICES_LIST.map((s) => <option key={s} value={s}>{s}</option>)}
+                    {SERVICES_LIST.map((s) => <option key={s} value={s}>{s === "Tous les services" ? t("reports.all") : s}</option>)}
                   </select>
                   <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
                 </div>
@@ -1324,14 +1674,14 @@ function RapportsView() {
 
               {/* Sévérité checkboxes */}
               <div>
-                <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest block mb-3">Niveaux de sévérité</label>
+                <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest block mb-3">{t("reports.severities")}</label>
                 <div className="space-y-2.5">
                   {([
-                    { label: "Critique",      color: "text-red-400",     checked: sevCritique, set: setSevCritique, dot: "bg-red-500"     },
-                    { label: "Avertissement", color: "text-amber-400",   checked: sevAvert,    set: setSevAvert,    dot: "bg-amber-500"   },
-                    { label: "Info",          color: "text-emerald-400", checked: sevInfo,     set: setSevInfo,     dot: "bg-emerald-400" },
+                    { label: t("reports.critical"), color: "text-red-400",     checked: sevCritique, set: setSevCritique, dot: "bg-red-500"     },
+                    { label: t("reports.warning"),  color: "text-amber-400",   checked: sevAvert,    set: setSevAvert,    dot: "bg-amber-500"   },
+                    { label: t("reports.info"),     color: "text-emerald-400", checked: sevInfo,     set: setSevInfo,     dot: "bg-emerald-400" },
                   ] as const).map(({ label, color, checked, set, dot }) => (
-                    <button key={label} onClick={() => set((p) => !p)}
+                    <button key={label} onClick={() => { set((p) => !p); setFormError(""); }}
                       className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all group hover:border-zinc-600"
                       style={{ borderColor: checked ? "transparent" : undefined, backgroundColor: checked ? "transparent" : undefined }}
                       data-checked={checked}>
@@ -1345,7 +1695,7 @@ function RapportsView() {
                       {checked && (
                         <span className={`text-[9px] font-mono font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${color} bg-current/10`}
                           style={{ backgroundColor: `color-mix(in srgb, currentColor 12%, transparent)` }}>
-                          inclus
+                          {t("reports.included")}
                         </span>
                       )}
                     </button>
@@ -1355,7 +1705,7 @@ function RapportsView() {
 
               {/* Format selector */}
               <div>
-                <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest block mb-3">Format d'export</label>
+                <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest block mb-3">{t("reports.exportFormat")}</label>
                 <div className="grid grid-cols-3 gap-2">
                   {(["PDF", "CSV", "JSON"] as const).map((fmt) => {
                     const s = FORMAT_ICON_COLOR[fmt];
@@ -1378,12 +1728,12 @@ function RapportsView() {
 
               {/* Summary preview */}
               <div className="bg-muted/50 border border-border/50 rounded-lg px-4 py-3 space-y-1.5">
-                <p className="text-[10px] text-zinc-600 uppercase tracking-widest font-semibold mb-2">Aperçu de la configuration</p>
+                <p className="text-[10px] text-zinc-600 uppercase tracking-widest font-semibold mb-2">{t("reports.preview")}</p>
                 {[
-                  ["Période",   `${dateDebut.split("-").reverse().join("/")} → ${dateFin.split("-").reverse().join("/")}`],
-                  ["Service",   selService],
-                  ["Format",    selFormat],
-                  ["Sévérités", [sevCritique && "CRITIQUE", sevAvert && "AVERT.", sevInfo && "INFO"].filter(Boolean).join(", ") || "Aucune"],
+                  [t("reports.period"), `${formatReportDate(dateDebut)} → ${formatReportDate(dateFin)}`],
+                  [t("reports.service"), selService === "Tous les services" ? t("reports.all") : selService],
+                  [t("reports.format"), selFormat],
+                  [t("reports.severities"), [sevCritique && t("reports.critical"), sevAvert && t("reports.warning"), sevInfo && t("reports.info")].filter(Boolean).join(", ") || "-"],
                 ].map(([k, v]) => (
                   <div key={k} className="flex items-start justify-between gap-2">
                     <span className="text-[10px] text-zinc-500 font-mono">{k}</span>
@@ -1391,6 +1741,12 @@ function RapportsView() {
                   </div>
                 ))}
               </div>
+
+              {formError && (
+                <div className="rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-[11px] font-mono text-red-300">
+                  {formError}
+                </div>
+              )}
 
               {/* Generate button */}
               <button
@@ -1407,17 +1763,17 @@ function RapportsView() {
                 {generating ? (
                   <>
                     <Loader2 size={15} className="animate-spin" />
-                    Génération en cours…
+                    {t("reports.generating")}
                   </>
                 ) : generated ? (
                   <>
                     <CheckCircle2 size={15} />
-                    Rapport généré !
+                    {t("reports.generated")}
                   </>
                 ) : (
                   <>
                     <FileDown size={15} />
-                    Générer le document
+                    {t("reports.generate")}
                   </>
                 )}
               </button>
@@ -1426,13 +1782,13 @@ function RapportsView() {
 
           {/* Quick stats card */}
           <div className="bg-card border border-border rounded-lg px-5 py-4">
-            <p className="text-[10px] text-zinc-600 uppercase tracking-widest font-semibold mb-3">Statistiques d'archive</p>
+            <p className="text-[10px] text-zinc-600 uppercase tracking-widest font-semibold mb-3">{t("reports.statsTitle")}</p>
             <div className="space-y-2.5">
               {[
-                { label: "Rapports générés",    value: reports.length,                  color: "text-foreground" },
-                { label: "Volume total archivé", value: "15.4 Mo",                       color: "text-foreground" },
-                { label: "Dernier export",       value: "Aujourd'hui à 20:01",           color: "text-zinc-400"  },
-                { label: "Format le + utilisé",  value: "PDF",                           color: "text-indigo-400"},
+                { label: t("reports.generatedReports"), value: reports.length, color: "text-foreground" },
+                { label: t("reports.archivedVolume"), value: formatBytes(totalSize), color: "text-foreground" },
+                { label: t("reports.lastExport"), value: lastReadyReport?.genere ?? "-", color: "text-zinc-400" },
+                { label: t("reports.mostUsedFormat"), value: mostUsedFormat[1] > 0 ? mostUsedFormat[0] : "-", color: "text-indigo-400"},
               ].map(({ label, value, color }) => (
                 <div key={label} className="flex items-center justify-between">
                   <span className="text-[11px] text-zinc-600">{label}</span>
@@ -1446,19 +1802,19 @@ function RapportsView() {
         {/* ═══════════════════════════════════════════════════════════
             RIGHT COLUMN — Table (2/3)
         ═══════════════════════════════════════════════════════════ */}
-        <div className="flex-1 min-w-0 flex flex-col gap-0 bg-card border border-border rounded-lg overflow-hidden">
+        <div className="flex min-h-[28rem] w-full min-w-0 flex-1 flex-col gap-0 overflow-hidden rounded-lg border border-border bg-card">
 
           {/* Table header */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-[#0d0d10]">
             <div className="flex items-center gap-2">
               <Clock size={14} className="text-indigo-400" />
-              <h3 className="text-sm font-semibold">Historique des Rapports Archivés</h3>
+              <h3 className="text-sm font-semibold">{t("reports.archiveHistory")}</h3>
               <span className="ml-2 text-[10px] font-mono text-zinc-600 bg-zinc-800/60 px-2 py-0.5 rounded-full">
-                {sorted.length} rapport{sorted.length > 1 ? "s" : ""}
+                {t("reports.reportCount", { count: sorted.length })}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-[11px] text-zinc-600 font-mono">Trié par :</span>
+              <span className="text-[11px] text-zinc-600 font-mono">{t("reports.sortedBy")}</span>
               <span className="text-[11px] text-zinc-400 font-mono">{sortField}</span>
             </div>
           </div>
@@ -1468,15 +1824,22 @@ function RapportsView() {
             className="grid gap-3 px-5 py-2.5 border-b border-border bg-muted/30 text-[10px] font-semibold text-zinc-600 uppercase tracking-widest"
             style={{ gridTemplateColumns: "2fr 1.2fr 80px 100px 110px" }}
           >
-            <ReportSortButton field="nom" label="Nom du fichier" sortField={sortField} sortAsc={sortAsc} onSort={toggleSort} />
-            <ReportSortButton field="debut" label="Période" sortField={sortField} sortAsc={sortAsc} onSort={toggleSort} />
-            <ReportSortButton field="taille" label="Taille" sortField={sortField} sortAsc={sortAsc} onSort={toggleSort} />
-            <ReportSortButton field="statut" label="Statut" sortField={sortField} sortAsc={sortAsc} onSort={toggleSort} />
-            <span>Actions</span>
+            <ReportSortButton field="nom" label={t("reports.fileColumn")} sortField={sortField} sortAsc={sortAsc} onSort={toggleSort} />
+            <ReportSortButton field="debut" label={t("reports.periodColumn")} sortField={sortField} sortAsc={sortAsc} onSort={toggleSort} />
+            <ReportSortButton field="taille" label={t("reports.sizeColumn")} sortField={sortField} sortAsc={sortAsc} onSort={toggleSort} />
+            <ReportSortButton field="statut" label={t("reports.statusColumn")} sortField={sortField} sortAsc={sortAsc} onSort={toggleSort} />
+            <span>{t("reports.actionsColumn")}</span>
           </div>
 
           {/* Rows */}
           <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: "none" } as React.CSSProperties}>
+            {sorted.length === 0 && (
+              <div className="flex h-56 flex-col items-center justify-center text-center text-zinc-500">
+                <FileDown size={28} className="mb-3 opacity-30" />
+                <p className="text-sm font-semibold text-zinc-400">{t("reports.noReportsTitle")}</p>
+                <p className="mt-1 text-xs font-mono text-zinc-600">{t("reports.noReportsBody")}</p>
+              </div>
+            )}
             {sorted.map((r, idx) => {
               const fmt = FORMAT_ICON_COLOR[r.format];
               const st  = STATUS_STYLE[r.statut];
@@ -1495,7 +1858,9 @@ function RapportsView() {
                     </span>
                     <div className="min-w-0">
                       <p className="font-mono text-zinc-200 truncate text-[11px]">{r.nom}.{r.format.toLowerCase()}</p>
-                      <p className="text-[10px] text-zinc-500 font-mono mt-0.5">Généré le {r.genere}</p>
+                      <p className="text-[10px] text-zinc-500 font-mono mt-0.5">
+                        {r.statut === "Échec" && r.error ? r.error : t("reports.generatedOn", { date: r.genere })}
+                      </p>
                     </div>
                   </div>
 
@@ -1515,7 +1880,7 @@ function RapportsView() {
                   <div>
                     <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-mono font-semibold ${st.pill}`}>
                       <span className={`w-1 h-1 rounded-full flex-shrink-0 ${st.dot} ${r.statut === "En cours" ? "animate-pulse" : ""}`} />
-                      {st.label}
+                      {statusLabel(r.statut)}
                     </span>
                   </div>
 
@@ -1523,28 +1888,32 @@ function RapportsView() {
                   <div className="flex items-center gap-1.5">
                     {r.statut === "Prêt" && (
                       <button
-                        title="Télécharger"
-                        onClick={() => void trackUserAction("REPORT_DOWNLOADED", `${r.nom}.${r.format.toLowerCase()}`, { reportId: r.id, format: r.format })}
+                        title={t("reports.download")}
+                        onClick={() => void handleDownloadReport(r)}
                         className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-indigo-600/10 border border-indigo-600/25 text-indigo-400 hover:bg-indigo-600/20 transition-all"
                       >
                         <Download size={12} />
-                        Télécharger
+                        {t("reports.download")}
                       </button>
                     )}
                     {r.statut === "En cours" && (
                       <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-zinc-600 border border-zinc-800 cursor-wait">
                         <Loader2 size={11} className="animate-spin" />
-                        En attente
+                        {t("reports.waiting")}
                       </span>
                     )}
                     {r.statut === "Échec" && (
-                      <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-red-500 border border-red-900/40 bg-red-500/5">
+                      <button
+                        type="button"
+                        onClick={() => void handleRetryReport(r)}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-red-500 border border-red-900/40 bg-red-500/5 hover:bg-red-500/10"
+                      >
                         <XCircleIcon size={11} />
-                        Relancer
-                      </span>
+                        {t("reports.retry")}
+                      </button>
                     )}
                     <button
-                      title="Supprimer"
+                      title={t("reports.delete")}
                       onClick={() => setReports((p) => p.filter((x) => x.id !== r.id))}
                       className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100"
                     >
@@ -1559,19 +1928,19 @@ function RapportsView() {
           {/* Table footer */}
           <div className="flex items-center justify-between px-5 py-2.5 border-t border-border bg-[#0d0d10]">
             <span className="text-[10px] font-mono text-zinc-500">
-              {sorted.length} rapport(s) · Filtre : <span className="text-zinc-500">{filterStatus}</span>
+              {t("reports.reportCount", { count: sorted.length })} · {t("reports.footerFilter")} <span className="text-zinc-500">{statusLabel(filterStatus)}</span>
             </span>
             <div className="flex items-center gap-3">
               <span className={`flex items-center gap-1.5 text-[10px] font-mono ${readyCnt > 0 ? "text-emerald-600" : "text-zinc-500"}`}>
-                <CheckCircle2 size={10} />{readyCnt} prêt{readyCnt > 1 ? "s" : ""}
+                <CheckCircle2 size={10} />{readyCnt} {readyCnt > 1 ? t("reports.readyPlural") : t("reports.ready")}
               </span>
               <span className="text-zinc-800">·</span>
               <span className={`flex items-center gap-1.5 text-[10px] font-mono ${pendingCnt > 0 ? "text-cyan-500" : "text-zinc-500"}`}>
-                <Loader2 size={10} />{pendingCnt} en cours
+                <Loader2 size={10} />{pendingCnt} {t("reports.pending")}
               </span>
               <span className="text-zinc-800">·</span>
               <span className={`flex items-center gap-1.5 text-[10px] font-mono ${failCnt > 0 ? "text-red-700" : "text-zinc-500"}`}>
-                <XCircleIcon size={10} />{failCnt} en échec
+                <XCircleIcon size={10} />{failCnt} {t("reports.failed")}
               </span>
             </div>
           </div>
@@ -1610,6 +1979,8 @@ function ProfileReadOnlyField({
 }
 
 function ProfilView() {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language === "en" ? "en-US" : "fr-FR";
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [profileForm, setProfileForm] = useState({ firstName: "", lastName: "", email: "" });
   const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
@@ -1685,9 +2056,9 @@ function ProfilView() {
             <UserCog size={15} className="text-cyan-300" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Mon Profil</h2>
+            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">{t("profile.title")}</h2>
             <p className="mt-0.5 text-xs font-mono text-zinc-500">
-              Identité, rôle et sécurité du compte
+              {t("profile.subtitle")}
             </p>
           </div>
         </div>
@@ -1695,7 +2066,7 @@ function ProfilView() {
 
       {loading && (
         <div className="rounded-lg border border-border bg-card px-4 py-3 text-xs font-mono text-zinc-500">
-          Chargement du profil...
+          {t("profile.loading")}
         </div>
       )}
       {error && (
@@ -1713,21 +2084,21 @@ function ProfilView() {
         <section className="rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
           <div className="flex items-center gap-2.5 border-b border-border bg-[#0d0d10] px-5 py-3.5">
             <ShieldCheck size={15} className="text-cyan-300" />
-            <h3 className="text-sm font-semibold">Informations Générales</h3>
+            <h3 className="text-sm font-semibold">{t("profile.generalInfo")}</h3>
           </div>
 
           <form onSubmit={handleProfileSubmit} className="space-y-5 px-5 py-5">
             <div className="grid gap-4 md:grid-cols-3">
               <ProfileReadOnlyField label="Username" value={profile?.username ?? "-"} icon={UserCog} />
               <ProfileReadOnlyField label="ID" value={String(profile?.id ?? "-")} icon={KeyRound} />
-              <ProfileReadOnlyField label="Rôle actuel" value={profile?.role ?? "-"} icon={ShieldCheck} />
+              <ProfileReadOnlyField label={t("profile.currentRole")} value={profile?.role ?? "-"} icon={ShieldCheck} />
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
               {([
-                ["Prénom", "firstName"],
-                ["Nom", "lastName"],
-                ["Email", "email"],
+                [t("profile.firstName"), "firstName"],
+                [t("profile.lastName"), "lastName"],
+                [t("profile.email"), "email"],
               ] as const).map(([label, key]) => (
                 <label key={key} className="block">
                   <span className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-zinc-500">{label}</span>
@@ -1745,7 +2116,10 @@ function ProfilView() {
               <div className="flex items-center gap-2.5">
                 <CalendarDays size={14} className="text-cyan-300" />
                 <p className="text-xs font-medium text-zinc-300">
-                  Membre depuis {profile?.createdAt ? new Date(profile.createdAt).toLocaleDateString("fr-FR") : "-"} · Dernière connexion {profile?.lastLoginAt ? new Date(profile.lastLoginAt).toLocaleString("fr-FR") : "jamais"}
+                  {t("profile.memberSince", {
+                    created: profile?.createdAt ? new Date(profile.createdAt).toLocaleDateString(locale) : "-",
+                    lastLogin: profile?.lastLoginAt ? new Date(profile.lastLoginAt).toLocaleString(locale) : t("profile.never"),
+                  })}
                 </p>
               </div>
             </div>
@@ -1756,7 +2130,7 @@ function ProfilView() {
               className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-400/20 disabled:opacity-60"
             >
               {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-              Enregistrer le profil
+              {t("profile.save")}
             </button>
           </form>
         </section>
@@ -1764,14 +2138,14 @@ function ProfilView() {
         <section className="rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
           <div className="flex items-center gap-2.5 border-b border-border bg-[#0d0d10] px-5 py-3.5">
             <KeyRound size={15} className="text-amber-400" />
-            <h3 className="text-sm font-semibold">Changer le mot de passe</h3>
+            <h3 className="text-sm font-semibold">{t("profile.changePassword")}</h3>
           </div>
 
           <form onSubmit={handlePasswordSubmit} className="space-y-4 px-5 py-5">
             {[
-              ["Mot de passe actuel", "currentPassword", "current-password"],
-              ["Nouveau mot de passe", "newPassword", "new-password"],
-              ["Confirmer le nouveau mot de passe", "confirmPassword", "new-password"],
+              [t("profile.currentPassword"), "currentPassword", "current-password"],
+              [t("profile.newPassword"), "newPassword", "new-password"],
+              [t("profile.changePassword"), "confirmPassword", "new-password"],
             ].map(([label, key, autoComplete]) => (
               <label key={label} className="block">
                 <span className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
@@ -1796,7 +2170,7 @@ function ProfilView() {
               className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-semibold text-amber-300 shadow-lg shadow-amber-950/20 transition hover:bg-amber-500/20 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35"
             >
               <Save size={15} />
-              Enregistrer les modifications
+              {t("profile.save")}
             </button>
 
           </form>
@@ -1819,8 +2193,8 @@ const ACTION_STYLE: Record<string, { badge: string; dot: string }> = {
   },
 };
 
-function formatActionDate(value: string) {
-  return new Date(value).toLocaleString("fr-FR", {
+function formatActionDate(value: string, locale = "fr-FR") {
+  return new Date(value).toLocaleString(locale, {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -1831,6 +2205,8 @@ function formatActionDate(value: string) {
 }
 
 function SessionsView() {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language === "en" ? "en-US" : "fr-FR";
   const [actions, setActions] = useState<UserActionLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1870,9 +2246,9 @@ function SessionsView() {
             <History size={15} className="text-cyan-300" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Journal de mes actions</h2>
+            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">{t("sessions.title")}</h2>
             <p className="mt-0.5 text-xs font-mono text-zinc-500">
-              Audit applicatif du compte {currentUser?.username ?? "connecté"}
+              {t("sessions.subtitle", { username: currentUser?.username ?? t("sessions.connectedUser") })}
             </p>
           </div>
         </div>
@@ -1883,7 +2259,7 @@ function SessionsView() {
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-500/20"
         >
           <RotateCw size={14} className={loading ? "animate-spin" : ""} />
-          Rafraîchir
+          {t("common.refresh")}
         </button>
       </div>
 
@@ -1891,26 +2267,26 @@ function SessionsView() {
         <div className="flex items-center justify-between border-b border-border bg-[#0d0d10] px-5 py-3.5">
           <div className="flex items-center gap-2.5">
             <ShieldCheck size={15} className="text-cyan-300" />
-            <h3 className="text-sm font-semibold">Historique des actions utilisateur</h3>
+            <h3 className="text-sm font-semibold">{t("sessions.title")}</h3>
           </div>
           <span className="rounded-full bg-zinc-800/70 px-2.5 py-1 text-[10px] font-mono font-semibold text-zinc-500">
-            {actions.length} entrée{actions.length > 1 ? "s" : ""}
+            {t("sessions.entries", { count: actions.length })}
           </span>
         </div>
 
         <div className="hidden grid-cols-[175px_190px_1fr_150px_1fr] gap-4 border-b border-border bg-muted/30 px-5 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-600 md:grid">
-          <span>Date & Heure</span>
-          <span>Action</span>
-          <span>Ressource</span>
-          <span>Adresse IP Source</span>
-          <span>Navigateur/OS détecté</span>
+          <span>{t("sessions.dateTime")}</span>
+          <span>{t("sessions.action")}</span>
+          <span>{t("sessions.resource")}</span>
+          <span>{t("sessions.sourceIp")}</span>
+          <span>{t("sessions.browser")}</span>
         </div>
 
         <div className="divide-y divide-border/40">
           {loading ? (
             <div className="flex h-40 flex-col items-center justify-center text-zinc-500">
               <Loader2 size={24} className="mb-2 animate-spin opacity-60" />
-              <p className="text-xs font-mono">Chargement du journal...</p>
+              <p className="text-xs font-mono">{t("sessions.loading")}</p>
             </div>
           ) : error ? (
             <div className="flex h-40 flex-col items-center justify-center text-red-400">
@@ -1920,7 +2296,7 @@ function SessionsView() {
           ) : actions.length === 0 ? (
             <div className="flex h-40 flex-col items-center justify-center text-zinc-500">
               <History size={28} className="mb-2 opacity-20" />
-              <p className="text-xs font-mono">Aucune action enregistrée pour ce compte</p>
+              <p className="text-xs font-mono">{t("sessions.empty")}</p>
             </div>
           ) : (
             actions.map((action) => {
@@ -1934,14 +2310,14 @@ function SessionsView() {
                 >
                   <div>
                     <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 md:hidden">
-                      Date & Heure
+                      {t("sessions.dateTime")}
                     </p>
-                    <p className="font-mono text-zinc-300">{formatActionDate(action.created_at)}</p>
+                    <p className="font-mono text-zinc-300">{formatActionDate(action.created_at, locale)}</p>
                   </div>
 
                   <div>
                     <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 md:hidden">
-                      Action
+                      {t("sessions.action")}
                     </p>
                     <span className={`inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-[10px] font-mono font-semibold ${style.badge}`}>
                       <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
@@ -1951,23 +2327,23 @@ function SessionsView() {
 
                   <div className="min-w-0">
                     <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 md:hidden">
-                      Ressource
+                      {t("sessions.resource")}
                     </p>
-                    <p className="truncate font-mono text-zinc-400">{action.resource ?? "Application"}</p>
+                    <p className="truncate font-mono text-zinc-400">{action.resource ?? t("sessions.application")}</p>
                   </div>
 
                   <div>
                     <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 md:hidden">
-                      Adresse IP Source
+                      {t("sessions.sourceIp")}
                     </p>
-                    <p className="font-mono text-zinc-400">{action.ip_source ?? "IP inconnue"}</p>
+                    <p className="font-mono text-zinc-400">{action.ip_source ?? t("sessions.unknownIp")}</p>
                   </div>
 
                   <div className="min-w-0">
                     <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 md:hidden">
-                      Navigateur/OS détecté
+                      {t("sessions.browser")}
                     </p>
-                    <p className="truncate font-mono text-zinc-500">{action.user_agent ?? "Agent inconnu"}</p>
+                    <p className="truncate font-mono text-zinc-500">{action.user_agent ?? t("sessions.unknownAgent")}</p>
                   </div>
                 </div>
               );
@@ -1984,6 +2360,7 @@ function SessionsView() {
 const ROLE_OPTIONS = ["user", "auditor", "admin", "super_admin"] as const;
 
 function AdministrationView() {
+  const { t } = useTranslation();
   const currentUser = getCurrentUser();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, totalPages: 1 });
@@ -2041,7 +2418,7 @@ function AdministrationView() {
     return (
       <main className="flex-1 flex flex-col items-center justify-center text-zinc-500">
         <ShieldCheck size={36} className="mb-3 opacity-30" />
-        <p className="text-sm font-mono">Accès réservé aux administrateurs</p>
+        <p className="text-sm font-mono">{t("admin.restricted")}</p>
       </main>
     );
   }
@@ -2054,9 +2431,9 @@ function AdministrationView() {
             <UserCog size={15} className="text-cyan-300" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Administration</h2>
+            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">{t("admin.title")}</h2>
             <p className="mt-0.5 text-xs font-mono text-zinc-500">
-              Gestion utilisateurs, rôles, exports et activité administrateur
+              {t("admin.subtitle")}
             </p>
           </div>
         </div>
@@ -2085,11 +2462,11 @@ function AdministrationView() {
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
         <section className="overflow-hidden rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
           <div className="flex flex-wrap items-center gap-3 border-b border-border bg-[#0d0d10] px-5 py-3.5">
-            <h3 className="text-sm font-semibold">Gestion utilisateurs</h3>
+            <h3 className="text-sm font-semibold">{t("admin.userManagement")}</h3>
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Recherche"
+              placeholder={t("admin.search")}
               className="ml-auto rounded-lg border border-border bg-muted px-3 py-2 text-xs text-zinc-200 outline-none"
             />
             <select
@@ -2097,34 +2474,34 @@ function AdministrationView() {
               onChange={(event) => setRole(event.target.value)}
               className="rounded-lg border border-border bg-muted px-3 py-2 text-xs text-zinc-200 outline-none"
             >
-              <option value="">Tous les rôles</option>
+              <option value="">{t("admin.allRoles")}</option>
               {ROLE_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
             <button
               onClick={() => void loadUsers(1)}
               className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-300"
             >
-              Filtrer
+              {t("live.apply")}
             </button>
           </div>
 
           <div className="hidden grid-cols-[60px_1fr_1fr_150px_120px_130px] gap-3 border-b border-border bg-muted/30 px-5 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-600 md:grid">
             <span>ID</span>
-            <span>Utilisateur</span>
+            <span>{t("admin.user")}</span>
             <span>Email</span>
-            <span>Rôle</span>
-            <span>Statut</span>
-            <span>Actions</span>
+            <span>{t("admin.role")}</span>
+            <span>{t("admin.status")}</span>
+            <span>{t("admin.actions")}</span>
           </div>
 
           <div className="divide-y divide-border/40">
             {loading ? (
               <div className="flex h-40 items-center justify-center text-xs font-mono text-zinc-500">
-                <Loader2 size={18} className="mr-2 animate-spin" /> Chargement...
+                <Loader2 size={18} className="mr-2 animate-spin" /> {t("admin.loading")}
               </div>
             ) : users.length === 0 ? (
               <div className="flex h-40 items-center justify-center text-xs font-mono text-zinc-500">
-                Aucun utilisateur
+                {t("admin.empty")}
               </div>
             ) : users.map((user) => (
               <div key={user.id} className="grid gap-3 px-5 py-3 text-xs md:grid-cols-[60px_1fr_1fr_150px_120px_130px] md:items-center">
@@ -2148,14 +2525,14 @@ function AdministrationView() {
                   ))}
                 </select>
                 <span className={user.isActive ? "text-emerald-400" : "text-red-400"}>
-                  {user.isActive ? "Actif" : "Désactivé"}
+                  {user.isActive ? t("admin.active") : t("admin.disabled")}
                 </span>
                 <button
                   disabled={user.id === currentUser?.id || !user.isActive}
                   onClick={() => void handleDeactivate(user)}
                   className="rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300 disabled:opacity-40"
                 >
-                  Désactiver
+                  {t("admin.deactivate")}
                 </button>
               </div>
             ))}
@@ -2163,26 +2540,26 @@ function AdministrationView() {
 
           <div className="flex items-center justify-between border-t border-border bg-[#0d0d10] px-5 py-3">
             <span className="text-[10px] font-mono text-zinc-500">
-              Page {pagination.page} / {pagination.totalPages} · {pagination.total} utilisateur(s)
+              {t("admin.pageStatus", { page: pagination.page, totalPages: pagination.totalPages, total: pagination.total })}
             </span>
             <div className="flex gap-2">
-              <button disabled={pagination.page <= 1} onClick={() => void loadUsers(pagination.page - 1)} className="rounded border border-zinc-800 px-2 py-1 text-[10px] text-zinc-500 disabled:opacity-40">Précédent</button>
-              <button disabled={pagination.page >= pagination.totalPages} onClick={() => void loadUsers(pagination.page + 1)} className="rounded border border-zinc-800 px-2 py-1 text-[10px] text-zinc-500 disabled:opacity-40">Suivant</button>
+              <button disabled={pagination.page <= 1} onClick={() => void loadUsers(pagination.page - 1)} className="rounded border border-zinc-800 px-2 py-1 text-[10px] text-zinc-500 disabled:opacity-40">{t("common.previous")}</button>
+              <button disabled={pagination.page >= pagination.totalPages} onClick={() => void loadUsers(pagination.page + 1)} className="rounded border border-zinc-800 px-2 py-1 text-[10px] text-zinc-500 disabled:opacity-40">{t("common.next")}</button>
             </div>
           </div>
         </section>
 
         <aside className="space-y-5">
           <section className="rounded-xl border border-zinc-800/80 bg-card/95 p-5 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
-            <h3 className="text-sm font-semibold">Historique exports</h3>
+            <h3 className="text-sm font-semibold">{t("reports.archiveHistory")}</h3>
             <p className="mt-2 text-xs leading-relaxed text-zinc-500">
-              Les exports JSON, CSV et PDF sont journalisés dans `user_action_logs` avec le type `REPORT_EXPORTED`.
+              {t("admin.exportNote")}
             </p>
           </section>
           <section className="rounded-xl border border-zinc-800/80 bg-card/95 p-5 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
-            <h3 className="text-sm font-semibold">Activité administrateurs</h3>
+            <h3 className="text-sm font-semibold">{t("admin.adminActivity")}</h3>
             <p className="mt-2 text-xs leading-relaxed text-zinc-500">
-              Les changements de rôle, désactivations et consultations admin apparaissent en temps réel dans le dashboard audit.
+              {t("admin.activityNote")}
             </p>
           </section>
         </aside>
@@ -2215,6 +2592,7 @@ const SSH_KEYS = [
 ];
 
 function SshSecurityView() {
+  const { t } = useTranslation();
   const [passwordAccessDisabled, setPasswordAccessDisabled] = useState(true);
 
   return (
@@ -2228,16 +2606,16 @@ function SshSecurityView() {
             <ShieldCheck size={15} className="text-cyan-300" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Sécurité & Clés SSH</h2>
+            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">{t("ssh.title")}</h2>
             <p className="mt-0.5 text-xs font-mono text-zinc-500">
-              Gestion des accès administrateur aux machines surveillées
+              {t("ssh.subtitle")}
             </p>
           </div>
         </div>
 
         <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-mono font-semibold text-emerald-400">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-          Authentification forte active
+          {t("ssh.strongAuthActive")}
         </span>
       </div>
 
@@ -2247,10 +2625,10 @@ function SshSecurityView() {
             <div className="flex items-center justify-between border-b border-border bg-[#0d0d10] px-5 py-3.5">
               <div className="flex items-center gap-2.5">
                 <KeyRound size={15} className="text-cyan-300" />
-                <h3 className="text-sm font-semibold">Clés SSH Autorisées</h3>
+                <h3 className="text-sm font-semibold">{t("ssh.authorizedKeys")}</h3>
               </div>
               <span className="rounded-full bg-zinc-800/70 px-2.5 py-1 text-[10px] font-mono font-semibold text-zinc-500">
-                {SSH_KEYS.length} clés
+                {t("ssh.keys", { count: SSH_KEYS.length })}
               </span>
             </div>
 
@@ -2282,7 +2660,7 @@ function SshSecurityView() {
                     className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-500/25 bg-red-500/[0.08] px-3 py-2 text-xs font-semibold text-red-300 transition hover:border-red-400/35 hover:bg-red-500/15 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/30"
                   >
                     <Trash size={13} />
-                    Supprimer
+                    {t("reports.delete")}
                   </button>
                 </div>
               ))}
@@ -2292,13 +2670,13 @@ function SshSecurityView() {
           <div className="overflow-hidden rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
             <div className="flex items-center gap-2.5 border-b border-border bg-[#0d0d10] px-5 py-3.5">
               <KeyRound size={15} className="text-amber-400" />
-              <h3 className="text-sm font-semibold">Ajouter une clé SSH</h3>
+              <h3 className="text-sm font-semibold">{t("ssh.addKey")}</h3>
             </div>
 
             <div className="space-y-4 px-5 py-5">
               <label className="block">
                 <span className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-                  Clé publique SSH
+                  {t("ssh.publicKey")}
                 </span>
                 <textarea
                   rows={5}
@@ -2309,7 +2687,7 @@ function SshSecurityView() {
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-[11px] leading-relaxed text-zinc-600">
-                  Formats acceptés : ssh-rsa, ecdsa-sha2-nistp256, ssh-ed25519.
+                  {t("ssh.acceptedFormats")}
                 </p>
                 <button
                   type="button"
@@ -2317,7 +2695,7 @@ function SshSecurityView() {
                   className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/20 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35"
                 >
                   <KeyRound size={14} />
-                  Ajouter la clé
+                  {t("ssh.add")}
                 </button>
               </div>
             </div>
@@ -2330,9 +2708,9 @@ function SshSecurityView() {
               <ShieldCheck size={17} className="text-emerald-400" />
             </div>
             <div>
-              <h3 className="text-sm font-semibold">Statut des accès</h3>
+              <h3 className="text-sm font-semibold">{t("ssh.accessStatus")}</h3>
               <p className="mt-0.5 text-xs font-mono text-zinc-500">
-                Politique SSH appliquée aux agents
+                {t("ssh.accessPolicy")}
               </p>
             </div>
           </div>
@@ -2348,10 +2726,10 @@ function SshSecurityView() {
           >
             <span>
               <span className="block text-sm font-medium text-zinc-100">
-                Désactiver l'accès SSH par mot de passe
+                {t("ssh.disablePassword")}
               </span>
               <span className="mt-1 block text-[11px] text-zinc-600">
-                Priorité aux clés publiques autorisées
+                {t("ssh.publicKeysPriority")}
               </span>
             </span>
             <span
@@ -2373,7 +2751,7 @@ function SshSecurityView() {
 
           <div className="mt-4 rounded-lg border border-zinc-800 bg-[#0d0d10] px-4 py-3">
             <p className="text-[11px] leading-relaxed text-zinc-500">
-              Lorsque cette option est active, les tentatives SSH par mot de passe sont refusées sur les machines compatibles.
+              {t("ssh.passwordNote")}
             </p>
           </div>
         </aside>
@@ -2392,6 +2770,12 @@ const SETTINGS_TABS = [
 ] as const;
 
 type SettingsTab = typeof SETTINGS_TABS[number];
+const SETTINGS_TAB_I18N_KEYS: Record<SettingsTab, string> = {
+  "Sécurité & Accès": "settings.tabs.security",
+  "Serveurs Distants & Cloud": "settings.tabs.cloud",
+  "Moteur d'IA": "settings.tabs.ai",
+  "Général": "settings.tabs.general",
+};
 
 const MONITORED_MACHINES = [
   {
@@ -2418,6 +2802,7 @@ const MONITORED_MACHINES = [
 ];
 
 function SecurityAccessSettings() {
+  const { t } = useTranslation();
   const [mfaRequired, setMfaRequired] = useState(true);
   const [shortSessions, setShortSessions] = useState(true);
   const [profileAudit, setProfileAudit] = useState(true);
@@ -2448,7 +2833,7 @@ function SecurityAccessSettings() {
       <section className="overflow-hidden rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
         <div className="flex items-center gap-2.5 border-b border-border bg-[#0d0d10] px-5 py-3.5">
           <ShieldCheck size={15} className="text-cyan-300" />
-          <h3 className="text-sm font-semibold">Règles de sécurité administrateur</h3>
+          <h3 className="text-sm font-semibold">{t("settings.securityRules")}</h3>
         </div>
         <div className="divide-y divide-border/40">
           {rules.map(({ label, detail, enabled, setEnabled }) => (
@@ -2484,13 +2869,13 @@ function SecurityAccessSettings() {
 
       <aside className="rounded-xl border border-zinc-800/80 bg-card/95 p-5 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
         <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">
-          État des règles
+          {t("settings.ruleStatus")}
         </p>
         <div className="mt-4 space-y-3">
           {[
-            ["Double validation", mfaRequired ? "Active" : "Inactive", mfaRequired ? "text-emerald-400" : "text-zinc-500"],
-            ["Sessions courtes", shortSessions ? "Actives" : "Inactives", shortSessions ? "text-emerald-400" : "text-zinc-500"],
-            ["Audit profil", profileAudit ? "Actif" : "Inactif", profileAudit ? "text-cyan-300" : "text-zinc-500"],
+            [t("settings.doubleValidation"), mfaRequired ? t("settings.active") : t("settings.inactive"), mfaRequired ? "text-emerald-400" : "text-zinc-500"],
+            [t("settings.shortSessions"), shortSessions ? t("settings.activePlural") : t("settings.inactivePlural"), shortSessions ? "text-emerald-400" : "text-zinc-500"],
+            [t("settings.profileAudit"), profileAudit ? t("settings.active") : t("settings.inactive"), profileAudit ? "text-cyan-300" : "text-zinc-500"],
           ].map(([label, value, color]) => (
             <div key={label} className="flex items-center justify-between gap-4">
               <span className="text-[11px] text-zinc-600">{label}</span>
@@ -2504,15 +2889,16 @@ function SecurityAccessSettings() {
 }
 
 function AuditAiSettings() {
+  const { t } = useTranslation();
   const [enabled, setEnabled] = useState(true);
-  const [sensitivity, setSensitivity] = useState("Équilibré");
+  const [sensitivity, setSensitivity] = useState("balanced");
 
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
       <section className="overflow-hidden rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
         <div className="flex items-center gap-2.5 border-b border-border bg-[#0d0d10] px-5 py-3.5">
           <BrainCircuit size={15} className="text-violet-400" />
-          <h3 className="text-sm font-semibold">Assistant IA pour l'audit</h3>
+          <h3 className="text-sm font-semibold">{t("settings.aiAssistant")}</h3>
         </div>
 
         <div className="space-y-5 px-5 py-5">
@@ -2527,10 +2913,10 @@ function AuditAiSettings() {
           >
             <span>
               <span className="block text-sm font-medium text-zinc-100">
-                Activer l'aide IA sur les journaux d'audit
+                {t("settings.aiEnable")}
               </span>
               <span className="mt-1 block text-[11px] text-zinc-500">
-                Signale les comportements inhabituels dans l'historique des actions
+                {t("settings.aiHelp")}
               </span>
             </span>
             <span
@@ -2548,7 +2934,7 @@ function AuditAiSettings() {
 
           <label className="block">
             <span className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-              Sensibilité de détection
+              {t("settings.detectionSensitivity")}
             </span>
             <select
               value={sensitivity}
@@ -2558,9 +2944,9 @@ function AuditAiSettings() {
               }}
               className="w-full appearance-none rounded-lg border border-border bg-muted px-3 py-3 text-xs text-zinc-200 outline-none transition focus:border-violet-500/45 focus:ring-1 focus:ring-violet-500/25"
             >
-              <option>Conservateur</option>
-              <option>Équilibré</option>
-              <option>Agressif</option>
+              <option value="conservative">{t("settings.conservative")}</option>
+              <option value="balanced">{t("settings.balanced")}</option>
+              <option value="aggressive">{t("settings.aggressive")}</option>
             </select>
           </label>
         </div>
@@ -2568,12 +2954,12 @@ function AuditAiSettings() {
 
       <aside className="rounded-xl border border-zinc-800/80 bg-card/95 p-5 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
         <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">
-          Détections IA
+          {t("settings.aiDetections")}
         </p>
         <div className="mt-4 rounded-lg border border-zinc-800 bg-[#0d0d10] px-3 py-4">
-          <p className="text-xs font-medium text-zinc-300">Aucune détection IA enregistrée</p>
+          <p className="text-xs font-medium text-zinc-300">{t("settings.noAiDetection")}</p>
           <p className="mt-1 text-[10px] font-mono text-zinc-600">
-            Les détections réelles seront affichées lorsqu'un moteur d'analyse sera connecté.
+            {t("settings.aiDetectionHelp")}
           </p>
         </div>
       </aside>
@@ -2582,6 +2968,7 @@ function AuditAiSettings() {
 }
 
 function GeneralSettings() {
+  const { t } = useTranslation();
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [retentionDays, setRetentionDays] = useState("90 jours");
 
@@ -2589,13 +2976,13 @@ function GeneralSettings() {
     <section className="overflow-hidden rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
       <div className="flex items-center gap-2.5 border-b border-border bg-[#0d0d10] px-5 py-3.5">
         <Settings size={15} className="text-cyan-300" />
-        <h3 className="text-sm font-semibold">Préférences générales d'audit</h3>
+        <h3 className="text-sm font-semibold">{t("settings.generalPreferences")}</h3>
       </div>
 
       <div className="grid gap-5 px-5 py-5 md:grid-cols-2">
         <label className="block">
           <span className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-            Conservation des logs
+            {t("settings.logRetention")}
           </span>
           <select
             value={retentionDays}
@@ -2622,8 +3009,8 @@ function GeneralSettings() {
           aria-pressed={autoRefresh}
         >
           <span>
-            <span className="block text-sm font-medium text-zinc-100">Actualisation automatique</span>
-            <span className="mt-1 block text-[11px] text-zinc-500">Rafraîchit les flux d'audit en arrière-plan</span>
+            <span className="block text-sm font-medium text-zinc-100">{t("settings.autoRefresh")}</span>
+            <span className="mt-1 block text-[11px] text-zinc-500">{t("settings.autoRefreshHelp")}</span>
           </span>
           <span
             className={`relative h-6 w-11 flex-shrink-0 rounded-full border transition ${
@@ -2643,6 +3030,7 @@ function GeneralSettings() {
 }
 
 function ParametresView() {
+  const { t } = useTranslation();
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("Serveurs Distants & Cloud");
   const maskedToken = "mel_agt_sk_••••••••••••••••••••••••••••••••";
 
@@ -2657,9 +3045,9 @@ function ParametresView() {
             <Settings size={15} className="text-cyan-300" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Configurations & Paramètres</h2>
+            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">{t("settings.title")}</h2>
             <p className="mt-0.5 text-xs font-mono text-zinc-500">
-              Gestion des agents, accès distants et aide IA à l'audit
+              {t("settings.subtitle")}
             </p>
           </div>
         </div>
@@ -2678,7 +3066,7 @@ function ParametresView() {
                     : "text-zinc-600 hover:bg-white/5 hover:text-zinc-300"
                 }`}
               >
-                {tab}
+                {t(SETTINGS_TAB_I18N_KEYS[tab])}
               </button>
             );
           })}
@@ -2692,17 +3080,17 @@ function ParametresView() {
             <div className="flex items-center justify-between border-b border-border bg-[#0d0d10] px-5 py-3.5">
               <div className="flex items-center gap-2.5">
                 <KeyRound size={15} className="text-cyan-300" />
-                <h3 className="text-sm font-semibold">Clés d'API d'Ingestion</h3>
+                <h3 className="text-sm font-semibold">{t("settings.apiKeys")}</h3>
               </div>
               <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-mono font-semibold text-emerald-400">
-                Rotation active
+                {t("settings.rotationActive")}
               </span>
             </div>
 
             <div className="space-y-4 px-5 py-5">
               <label className="block">
                 <span className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-                  Token d'authentification pour Agents Distants
+                  {t("settings.agentToken")}
                 </span>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <div className="relative flex-1">
@@ -2718,10 +3106,10 @@ function ParametresView() {
                     type="button"
                     onClick={() => void trackUserAction("SETTINGS_UPDATED", "Token agent copié", { target: "agent-token" })}
                     className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-700 px-3 py-3 text-xs font-semibold text-zinc-300 transition hover:border-cyan-400/50 hover:bg-cyan-400/10 hover:text-cyan-200"
-                    title="Copier le token"
+                    title={t("common.copy")}
                   >
                     <Copy size={14} />
-                    Copier
+                    {t("common.copy")}
                   </button>
                   <button
                     type="button"
@@ -2729,13 +3117,13 @@ function ParametresView() {
                     className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/20 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35"
                   >
                     <RotateCw size={14} />
-                    Régénérer
+                    {t("settings.regenerate")}
                   </button>
                 </div>
               </label>
 
               <p className="text-[11px] leading-relaxed text-zinc-600">
-                Utilisez ce jeton uniquement sur les agents approuvés. Toute régénération invalide les anciennes connexions distantes.
+                {t("settings.tokenNote")}
               </p>
             </div>
           </div>
@@ -2743,13 +3131,13 @@ function ParametresView() {
           <div className="rounded-xl border border-zinc-800/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)] p-5">
             <div className="mb-4 flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-semibold">Liste des Machines Surveillées</h3>
+                <h3 className="text-sm font-semibold">{t("settings.monitoredMachines")}</h3>
                 <p className="mt-0.5 text-xs font-mono text-zinc-500">
-                  Agents connectés au collecteur central
+                  {t("settings.agentsConnected")}
                 </p>
               </div>
               <span className="rounded-full bg-cyan-500/10 px-2.5 py-1 text-[10px] font-mono font-semibold text-cyan-300">
-                3 machines
+                {t("settings.machines", { count: MONITORED_MACHINES.length })}
               </span>
             </div>
 
@@ -2786,13 +3174,13 @@ function ParametresView() {
         <aside className="space-y-5">
           <div className="rounded-lg border border-border bg-[#0d0d10] p-5">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">
-              État d'ingestion
+              {t("settings.ingestionState")}
             </p>
             <div className="mt-4 space-y-3">
               {[
-                ["Collecteur central", "Synchronisé", "text-emerald-400"],
-                ["File d'ingestion", "Stable", "text-cyan-300"],
-                ["Agents hors ligne", "1 signalé", "text-zinc-500"],
+                [t("settings.centralCollector"), t("settings.synchronized"), "text-emerald-400"],
+                [t("settings.ingestQueue"), t("settings.stable"), "text-cyan-300"],
+                [t("settings.offlineAgents"), t("settings.oneReported"), "text-zinc-500"],
               ].map(([label, value, color]) => (
                 <div key={label} className="flex items-center justify-between gap-4">
                   <span className="text-[11px] text-zinc-600">{label}</span>
@@ -2817,10 +3205,12 @@ function ParametresView() {
 // ── Root ───────────────────────────────────────────────────────────────────────
 
 export default function Dashboard({ onLogout }: { onLogout: () => void }) {
+  const { t } = useTranslation();
   const [activeNav, setActiveNav] = useState<NavId>("dashboard");
   const currentUser = getCurrentUser();
   const [playing,   setPlaying]   = useState(true);
   const [logs,      setLogs]      = useState<AuditLog[]>([]);
+  const [hourlyStats, setHourlyStats] = useState<AuditLogHourlyStatsPoint[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [journalctlBusy, setJournalctlBusy] = useState(false);
   const [journalctlStatus, setJournalctlStatus] = useState<JournalctlLiveStatus | null>(null);
@@ -2848,8 +3238,18 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     totalPages: 1,
   });
   const didMountRef = useRef(false);
+  const journalctlBootstrapRef = useRef(false);
 
   useEffect(() => { document.documentElement.classList.add("dark"); }, []);
+
+  const loadHourlyStats = useCallback(async () => {
+    try {
+      const response = await getAuditLogHourlyStats(24);
+      setHourlyStats(response.data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Impossible de charger les statistiques 24h");
+    }
+  }, []);
 
   const loadLogs = useCallback(async (nextQuery: typeof query) => {
     setLoading(true);
@@ -2894,7 +3294,23 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   }, [loadLogs, query]);
 
   useEffect(() => {
+    const initialTimer = window.setTimeout(() => {
+      void loadHourlyStats();
+    }, 0);
+    const interval = window.setInterval(() => {
+      void loadHourlyStats();
+    }, 60000);
+
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(interval);
+    };
+  }, [loadHourlyStats]);
+
+  useEffect(() => {
     const socket = connectAuditLogSocket((log) => {
+      setHourlyStats((current) => addLogToHourlyStats(current, log));
+
       if (!playing || query.page !== 1) return;
 
       setLogs((current) => {
@@ -2910,12 +3326,49 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   }, [playing, query.page, query.limit]);
 
   useEffect(() => {
-    void getJournalctlLiveStatus()
-      .then(setJournalctlStatus)
-      .catch(() => {
+    if (journalctlBootstrapRef.current) return;
+    journalctlBootstrapRef.current = true;
+
+    let cancelled = false;
+    const canManageJournalctl = ["admin", "super_admin"].includes(currentUser?.role ?? "");
+
+    async function bootstrapJournalctlLive() {
+      try {
+        const status = await getJournalctlLiveStatus();
+        if (cancelled) return;
+
+        if (!canManageJournalctl || status.running) {
+          setJournalctlStatus(status);
+          return;
+        }
+
+        setJournalctlBusy(true);
+        const startedStatus = await startJournalctlLive();
+        if (cancelled) return;
+
+        setJournalctlStatus(startedStatus);
+        await loadLogs({ ...query, page: 1 });
+        await loadHourlyStats();
+      } catch (err) {
+        if (cancelled) return;
+
         setJournalctlStatus(null);
-      });
-  }, []);
+        if (canManageJournalctl) {
+          setError(err instanceof Error ? err.message : "Démarrage journalctl -f impossible");
+        }
+      } finally {
+        if (!cancelled) {
+          setJournalctlBusy(false);
+        }
+      }
+    }
+
+    void bootstrapJournalctlLive();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.role, loadHourlyStats, loadLogs, query]);
 
   useEffect(() => {
     if (!didMountRef.current) {
@@ -2941,12 +3394,13 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
         : await startJournalctlLive();
       setJournalctlStatus(nextStatus);
       await loadLogs({ ...query, page: 1 });
+      await loadHourlyStats();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Action journalctl -f impossible");
     } finally {
       setJournalctlBusy(false);
     }
-  }, [journalctlStatus?.running, loadLogs, query]);
+  }, [journalctlStatus, loadHourlyStats, loadLogs, query]);
 
   const handleQueryChange = useCallback((nextQuery: AuditLogQuery) => {
     setQuery((current) => ({
@@ -2980,7 +3434,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           journalctlBusy={journalctlBusy}
         />
       ) : activeNav === "dashboard" ? (
-        <DashboardView logs={logs} loading={loading} error={error} playing={playing} setPlaying={setPlaying} />
+        <DashboardView logs={logs} hourlyStats={hourlyStats} loading={loading} error={error} playing={playing} setPlaying={setPlaying} />
       ) : activeNav === "rapports" ? (
         <RapportsView />
       ) : activeNav === "parametres" ? (
@@ -2996,7 +3450,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
       ) : (
         <main className="flex-1 flex flex-col items-center justify-center text-zinc-500">
           <Terminal size={36} className="mb-3 opacity-20" />
-          <p className="text-sm font-mono">Section en cours de développement</p>
+          <p className="text-sm font-mono">{t("settings.developmentSection")}</p>
         </main>
       )}
     </Shell>

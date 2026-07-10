@@ -232,6 +232,28 @@ export function getExportUrl(format: 'json' | 'csv' | 'pdf', params: Record<stri
   return `${API_BASE_URL}/api/export/${format}?${query.toString()}`;
 }
 
+export async function fetchExportBlob(format: 'json' | 'csv' | 'pdf', params: Record<string, string | number | undefined> = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') query.set(key, String(value));
+  });
+
+  const response = await fetch(`${API_BASE_URL}/api/export/${format}?${query.toString()}`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      handleUnauthorized();
+    }
+
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data?.error || `Erreur ${response.status}`);
+  }
+
+  return response.blob();
+}
+
 export async function trackUserAction(
   actionType: string,
   resource?: string,

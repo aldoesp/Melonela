@@ -17,11 +17,13 @@ function interpret(event) {
   const rule = findMatchingRule(event, rules);
 
   if (!rule) {
+    const rawMessage = event.message || FALLBACK_HUMAN_EVENT.title;
+
     return {
       ...FALLBACK_HUMAN_EVENT,
       ...event,
-      title: event.title || FALLBACK_HUMAN_EVENT.title,
-      description: event.description || FALLBACK_HUMAN_EVENT.description,
+      title: event.title || rawMessage,
+      description: event.description || rawMessage,
       category: event.category || FALLBACK_HUMAN_EVENT.category,
       icon: event.icon || FALLBACK_HUMAN_EVENT.icon,
       human_severity: event.human_severity || FALLBACK_HUMAN_EVENT.human_severity,

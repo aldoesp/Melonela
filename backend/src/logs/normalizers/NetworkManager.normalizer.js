@@ -1,149 +1,113 @@
-function baseEvent(message, overrides = {}) {
+const { buildLogFingerprint } = require('../fingerprint/buildLogFingerprint');
+const { buildUnknownEvent } = require('../fallback/buildUnknownEvent');
+const { parseNetworkManagerMessage } = require('../journalctlParser');
+const { NETWORK_MANAGER_RULES } = require('./networkManager.rules');
+
+function getNamedGroups(match) {
+  return match?.groups || {};
+}
+
+function normalizeSeverity(severity) {
+  if (['low', 'medium', 'high', 'critical'].includes(severity)) return severity;
+  return 'low';
+}
+
+function normalizeFields(fields) {
+  const normalized = { ...fields };
+
+  if (fields.interface && !normalized.iface) normalized.iface = fields.interface;
+  if (fields.ip_address && !normalized.ip) normalized.ip = fields.ip_address;
+  if (fields.connection && !normalized.connection_name) normalized.connection_name = fields.connection;
+  if (fields.from_state && !normalized.state_from) normalized.state_from = fields.from_state;
+  if (fields.to_state && !normalized.state_to) normalized.state_to = fields.to_state;
+  if (fields.timeout_seconds) normalized.timeout_seconds = Number(fields.timeout_seconds);
+
+  return normalized;
+}
+
+function normalizeWithRule(parsedLog, cleanedMessage, nm, rule) {
+  const match = cleanedMessage.match(rule.pattern);
+  if (!match) return null;
+
+  const fields = normalizeFields(getNamedGroups(match));
+  const ruleSeverity = typeof rule.severity === 'function'
+    ? rule.severity(fields)
+    : rule.severity;
+  const description = typeof rule.buildDescription === 'function'
+    ? rule.buildDescription(fields)
+    : rule.description || rule.title;
+
   return {
-    event_type: overrides.event_type || 'networkmanager_event',
-    severity: overrides.severity || 'low',
-    technical_severity: overrides.technical_severity || 'info',
-    category: overrides.category || 'network',
-    title: overrides.title || 'Événement NetworkManager',
-    description: overrides.description || message,
-    interpretation_rule_id: overrides.interpretation_rule_id || 'networkmanager_generic',
-    interpretation_confidence: overrides.interpretation_confidence ?? 0.5,
-    normalized_payload: overrides.normalized_payload || {},
+    event_type: rule.event_type,
+    severity: normalizeSeverity(ruleSeverity),
+    technical_severity: nm.nm_level || ruleSeverity || 'info',
+    category: rule.category,
+    title: rule.title,
+    description,
+    interpretation_rule_id: rule.id,
+    interpretation_confidence: rule.confidence ?? 0.95,
+    normalized_payload: {
+      ...fields,
+      action: rule.id,
+      fingerprint: buildLogFingerprint(cleanedMessage),
+      message: cleanedMessage,
+      raw_message: parsedLog.message,
+      nm_level: nm.nm_level,
+      nm_monotonic_time: nm.nm_monotonic_time,
+      monotonic_timestamp: nm.nm_monotonic_time,
+      normalized: true,
+      needs_rule: false,
+      rule_id: rule.id,
+      parser_version: 'melonela-normalizer-commonjs-v1',
+    },
   };
 }
 
-function stripNetworkManagerPrefix(message) {
-  return String(message || '')
-    .replace(/^<[^>]+>\s*/, '')
-    .replace(/^\[[^\]]+\]\s*/, '')
-    .trim();
-}
-
-function normalizeDhcp4NewLease(parsedLog, message) {
-  const match = message.match(/\bdhcp4\s+\(([^)]+)\):.*\bnew lease\b.*\baddress=([0-9]{1,3}(?:\.[0-9]{1,3}){3})\b/i);
-  if (!match) return null;
-
-  const [, networkInterface, ip] = match;
-
-  return baseEvent(message, {
-    event_type: 'network_dhcp_lease_acquired',
-    severity: 'low',
-    technical_severity: 'info',
-    category: 'network',
-    title: 'Bail DHCP obtenu',
-    description: `NetworkManager a obtenu l’adresse IP ${ip} sur l’interface ${networkInterface}.`,
-    interpretation_rule_id: 'networkmanager_dhcp4_new_lease',
-    interpretation_confidence: 0.95,
-    normalized_payload: {
-      interface: networkInterface,
-      ip,
-      protocol: 'dhcp4',
-      action: 'dhcp4_new_lease',
-      process_name: parsedLog.process_name || 'NetworkManager',
-      process_id: parsedLog.process_id || null,
-    },
-  });
-}
-
-function normalizeCanceledDhcp(parsedLog, message) {
-  const match = message.match(/\bdhcp4\s+\(([^)]+)\):.*canceled DHCP transaction/i);
-  if (!match) return null;
-
-  return baseEvent(message, {
-    event_type: 'network_dhcp_transaction_canceled',
-    severity: 'medium',
-    technical_severity: 'warning',
-    category: 'network',
-    title: 'Transaction DHCP annulée',
-    description: `NetworkManager a annulé une transaction DHCP sur l’interface ${match[1]}.`,
-    interpretation_rule_id: 'networkmanager_dhcp4_canceled',
-    interpretation_confidence: 0.9,
-    normalized_payload: {
-      interface: match[1],
-      protocol: 'dhcp4',
-      action: 'dhcp4_canceled',
-      process_name: parsedLog.process_name || 'NetworkManager',
-      process_id: parsedLog.process_id || null,
-    },
-  });
-}
-
-function normalizeSupplicantState(parsedLog, message) {
-  const match = message.match(/supplicant interface state:\s*([^\s]+)\s*->\s*([^\s]+)/i);
-  if (!match) return null;
-
-  return baseEvent(message, {
-    event_type: 'network_supplicant_state_changed',
-    severity: 'low',
-    technical_severity: 'info',
-    category: 'network',
-    title: 'État Wi-Fi modifié',
-    description: `NetworkManager a changé l’état supplicant de ${match[1]} vers ${match[2]}.`,
-    interpretation_rule_id: 'networkmanager_supplicant_state_change',
-    interpretation_confidence: 0.9,
-    normalized_payload: {
-      from_state: match[1],
-      to_state: match[2],
-      action: 'supplicant_state_changed',
-      process_name: parsedLog.process_name || 'NetworkManager',
-      process_id: parsedLog.process_id || null,
-    },
-  });
-}
-
-function normalizeDhcpRestarting(parsedLog, message) {
-  const match = message.match(/\bip:dhcp4:\s*restarting/i);
-  if (!match) return null;
-
-  return baseEvent(message, {
-    event_type: 'network_dhcp_restarting',
-    severity: 'medium',
-    technical_severity: 'warning',
-    category: 'network',
-    title: 'DHCP redémarré',
-    description: 'NetworkManager redémarre la configuration DHCP IPv4.',
-    interpretation_rule_id: 'networkmanager_dhcp4_restarting',
-    interpretation_confidence: 0.85,
-    normalized_payload: {
-      protocol: 'dhcp4',
-      action: 'dhcp4_restarting',
-      process_name: parsedLog.process_name || 'NetworkManager',
-      process_id: parsedLog.process_id || null,
-    },
-  });
-}
-
 function normalizeNetworkManager(parsedLog) {
-  const message = stripNetworkManagerPrefix(parsedLog.message);
-  const rules = [
-    normalizeDhcp4NewLease,
-    normalizeCanceledDhcp,
-    normalizeSupplicantState,
-    normalizeDhcpRestarting,
-  ];
+  const nm = parseNetworkManagerMessage(parsedLog.message);
+  const cleanedMessage = nm.cleaned_message;
 
-  for (const rule of rules) {
-    const normalized = rule(parsedLog, message);
+  for (const rule of NETWORK_MANAGER_RULES) {
+    const normalized = normalizeWithRule(parsedLog, cleanedMessage, nm, rule);
     if (normalized) return normalized;
   }
 
-  return baseEvent(message, {
-    event_type: 'networkmanager_event',
-    severity: 'low',
-    technical_severity: 'info',
-    category: 'network',
-    title: 'Événement NetworkManager',
-    description: message,
-    interpretation_rule_id: 'networkmanager_generic',
-    interpretation_confidence: 0.4,
-    normalized_payload: {
-      action: 'networkmanager_event',
-      process_name: parsedLog.process_name || 'NetworkManager',
-      process_id: parsedLog.process_id || null,
-    },
+  const unknown = buildUnknownEvent({
+    rawLine: parsedLog.rawLine,
+    rawMessage: parsedLog.message,
+    service: 'NetworkManager',
+    processName: parsedLog.process_name,
+    processId: parsedLog.process_id,
+    hostName: parsedLog.host_name,
+    cleanedMessage,
   });
+
+  return {
+    event_type: unknown.event_type,
+    severity: unknown.severity,
+    technical_severity: nm.nm_level || 'info',
+    category: unknown.category,
+    title: unknown.title,
+    description: unknown.description,
+    interpretation_rule_id: 'networkmanager_unknown',
+    interpretation_confidence: 0.2,
+    normalized_payload: {
+      action: 'networkmanager_unknown',
+      fingerprint: unknown.fingerprint,
+      message: cleanedMessage,
+      raw_message: parsedLog.message,
+      nm_level: nm.nm_level,
+      nm_monotonic_time: nm.nm_monotonic_time,
+      monotonic_timestamp: nm.nm_monotonic_time,
+      normalized: false,
+      needs_rule: true,
+      parser_version: unknown.parser_version,
+    },
+  };
 }
 
 module.exports = {
+  NETWORK_MANAGER_RULES,
   normalizeNetworkManager,
+  parseNetworkManagerMessage,
 };

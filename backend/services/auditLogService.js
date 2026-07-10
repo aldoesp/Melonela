@@ -7,6 +7,21 @@ function toPositiveInt(value, fallback, max) {
   return Math.min(parsed, max);
 }
 
+function normalizeDateBound(value, endOfDay = false) {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  const trimmed = value.trim();
+  if (!endOfDay || !/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  return `${trimmed}T23:59:59.999Z`;
+}
+
+function normalizeUiSeverities(value) {
+  const input = Array.isArray(value) ? value : String(value || '').split(',');
+  const allowed = new Set(['info', 'warning', 'critical']);
+  return input
+    .map((item) => String(item).trim().toLowerCase())
+    .filter((item) => allowed.has(item));
+}
+
 function mapSystemEventLog(row) {
   return {
     id: row.id,
@@ -179,6 +194,17 @@ function buildWhereClause(filters) {
     conditions.push(`interpretation_rule_id = $${values.length}`);
   }
 
+  if (Array.isArray(filters.uiSeverities) && filters.uiSeverities.length > 0) {
+    values.push(filters.uiSeverities);
+    conditions.push(`CASE
+      WHEN human_severity IN ('critical', 'high') THEN 'critical'
+      WHEN human_severity = 'medium' THEN 'warning'
+      WHEN severity IN ('critical', 'high') THEN 'critical'
+      WHEN severity = 'medium' THEN 'warning'
+      ELSE 'info'
+    END = ANY($${values.length})`);
+  }
+
   if (filters.dateFrom) {
     values.push(filters.dateFrom);
     conditions.push(`event_timestamp >= $${values.length}`);
@@ -257,7 +283,7 @@ async function getLatestSystemEventLogPosition() {
 
 async function listAuditLogs(query = {}) {
   const page = toPositiveInt(query.page, 1, 100000);
-  const limit = toPositiveInt(query.limit, 20, 100);
+  const limit = toPositiveInt(query.limit, 20, 1000);
   const offset = (page - 1) * limit;
 
   const filters = {
@@ -272,8 +298,9 @@ async function listAuditLogs(query = {}) {
     category: typeof query.category === 'string' ? query.category.trim() : '',
     humanSeverity: typeof query.human_severity === 'string' ? query.human_severity.trim() : (query.humanSeverity || ''),
     interpretationRuleId: typeof query.interpretation_rule_id === 'string' ? query.interpretation_rule_id.trim() : (query.interpretationRuleId || ''),
-    dateFrom: query.date_from || query.dateFrom || query.startDate || '',
-    dateTo: query.date_to || query.dateTo || query.endDate || '',
+    uiSeverities: normalizeUiSeverities(query.ui_severities || query.uiSeverities || ''),
+    dateFrom: normalizeDateBound(query.date_from || query.dateFrom || query.startDate || ''),
+    dateTo: normalizeDateBound(query.date_to || query.dateTo || query.endDate || '', true),
   };
 
   const { clause, values } = buildWhereClause(filters);
@@ -310,8 +337,62 @@ async function listAuditLogs(query = {}) {
   };
 }
 
+async function getHourlyAuditLogStats(query = {}) {
+  const hours = toPositiveInt(query.hours, 24, 168);
+
+  const result = await pool.query(
+    `WITH bounds AS (
+       SELECT
+         date_trunc('hour', NOW()) - (($1::int - 1) * INTERVAL '1 hour') AS start_hour,
+         date_trunc('hour', NOW()) AS end_hour
+     ),
+     buckets AS (
+       SELECT generate_series(start_hour, end_hour, INTERVAL '1 hour') AS bucket_start
+       FROM bounds
+     ),
+     classified AS (
+       SELECT
+         date_trunc('hour', event_timestamp) AS bucket_start,
+         CASE
+           WHEN human_severity IN ('critical', 'high') THEN 'critical'
+           WHEN human_severity = 'medium' THEN 'warning'
+           WHEN severity IN ('critical', 'high') THEN 'critical'
+           WHEN severity = 'medium' THEN 'warning'
+           ELSE 'info'
+         END AS ui_severity
+       FROM system_event_logs, bounds
+       WHERE event_timestamp >= bounds.start_hour
+         AND event_timestamp < bounds.end_hour + INTERVAL '1 hour'
+     )
+     SELECT
+       buckets.bucket_start,
+       COUNT(*) FILTER (WHERE classified.ui_severity = 'info')::int AS info,
+       COUNT(*) FILTER (WHERE classified.ui_severity = 'warning')::int AS warning,
+       COUNT(*) FILTER (WHERE classified.ui_severity = 'critical')::int AS critical,
+       COUNT(classified.ui_severity)::int AS total
+     FROM buckets
+     LEFT JOIN classified ON classified.bucket_start = buckets.bucket_start
+     GROUP BY buckets.bucket_start
+     ORDER BY buckets.bucket_start ASC`,
+    [hours]
+  );
+
+  return {
+    hours,
+    generatedAt: new Date().toISOString(),
+    data: result.rows.map((row) => ({
+      bucketStart: row.bucket_start,
+      info: row.info,
+      warning: row.warning,
+      critical: row.critical,
+      total: row.total,
+    })),
+  };
+}
+
 module.exports = {
   ensureSystemEventLogTable,
+  getHourlyAuditLogStats,
   getLatestSystemEventLogPosition,
   insertSystemEventLog,
   listAuditLogs,

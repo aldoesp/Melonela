@@ -11,11 +11,13 @@ function toExportQuery(query) {
   return {
     ...query,
     page: 1,
-    limit: 100,
+    limit: query.limit || 1000,
     search: query.action || query.search || '',
     severity: query.severity || '',
     event_type: query.event_type || query.type || '',
     source_type: query.source_type || '',
+    service: query.service || '',
+    ui_severities: query.ui_severities || query.uiSeverities || '',
     date_from: query.date_from || query.startDate || query.debut || '',
     date_to: query.date_to || query.endDate || query.fin || '',
   };
@@ -97,13 +99,17 @@ function buildPdfBuffer(logs, query) {
 }
 
 async function auditExport(user, req, format, count) {
-  await recordUserAction({
-    user,
-    actionType: format === 'DOWNLOAD' ? 'REPORT_DOWNLOADED' : 'REPORT_EXPORTED',
-    resource: `Export ${format}`,
-    req,
-    details: { format, count },
-  });
+  try {
+    await recordUserAction({
+      user,
+      actionType: format === 'DOWNLOAD' ? 'REPORT_DOWNLOADED' : 'REPORT_EXPORTED',
+      resource: `Export ${format}`,
+      req,
+      details: { format, count },
+    });
+  } catch (error) {
+    console.warn('Export audit log skipped:', error.message);
+  }
 }
 
 module.exports = {
